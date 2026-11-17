@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getTestClockOffset, now, nowMs, setTestClockOffset } from "@/lib/clock";
+import { getTestClockOffset, now, nowMs, setTestClock, setTestClockOffset } from "@/lib/clock";
 
 const KEY = Symbol.for("attendance.testClockOffsetMs");
+const FIXED = Symbol.for("attendance.testClockFixedMs");
 
 describe("server clock", () => {
   afterEach(() => {
     delete (globalThis as Record<symbol, unknown>)[KEY];
+    delete (globalThis as Record<symbol, unknown>)[FIXED];
     vi.useRealTimers();
     vi.unstubAllEnvs();
   });
@@ -38,5 +40,23 @@ describe("server clock", () => {
     vi.stubEnv("AUTH_TEST_MODE", "");
     const t = Date.now();
     expect(Math.abs(nowMs() - t)).toBeLessThan(1000);
+  });
+
+  it("freezes with fixedMs, shifts with offsetMs, clears with {} (test mode only)", () => {
+    vi.stubEnv("AUTH_TEST_MODE", "1");
+    const fixed = Date.parse("2026-11-17T09:00:15.000Z");
+    setTestClock({ fixedMs: fixed });
+    expect(nowMs()).toBe(fixed);
+    expect(nowMs()).toBe(fixed);
+    setTestClock({ offsetMs: -3_600_000 });
+    expect(Math.abs(nowMs() - (Date.now() - 3_600_000))).toBeLessThan(1000);
+    setTestClock({});
+    expect(Math.abs(nowMs() - Date.now())).toBeLessThan(1000);
+    expect(() => setTestClock({ offsetMs: 1, fixedMs: 2 })).toThrow();
+    // a frozen clock planted outside test mode is ignored
+    setTestClock({ fixedMs: 1 });
+    vi.stubEnv("AUTH_TEST_MODE", "");
+    expect(Math.abs(nowMs() - Date.now())).toBeLessThan(1000);
+    expect(() => setTestClock({})).toThrow();
   });
 });
