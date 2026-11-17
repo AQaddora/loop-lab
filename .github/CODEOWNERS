@@ -1,0 +1,2 @@
+# D-024: every pull request needs the loop holder's review. Once the production loop runs, a merge to main deploys to production (D-023).
+* @AQaddora

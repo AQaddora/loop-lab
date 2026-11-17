@@ -1,0 +1,94 @@
+# The CI oracle (specs/prod-loop.md PR-08). It is the first reviewer of every pull request.
+#
+# - Runs on pull_request and on push to main. Never pull_request_target: fork code must never run
+#   with this repo's token or with any secret.
+# - Uses no secret at all. apps/attendance/.env.e2e holds dummy, test-only values, and
+#   check-prod-no-test-mode.sh sets its own throwaway values.
+# - The job id and name are both "oracle". Branch protection (D-024, backlog P05) and the
+#   autodeploy (spec §4.1 step 2) look for a check with exactly that name.
+# - No path filters on purpose: a required check that never runs would block a docs-only PR.
+# - The steps are the same commands a task's done-when runs, from the repo root.
+# - The secret scan runs first, right after checkout: it needs only git and python3, and on a
+#   public repo it is the gate that matters most (PR-07).
+# - A pull_request run uses the PR's own copy of this file, apps/attendance/scripts/, the Playwright
+#   and Vitest configs, loop/checks/ and loop/hooks/. So a PR can turn "oracle" green by changing
+#   the oracle itself. The oracle is only as trustworthy as the review of changes to it.
+name: oracle
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # A PR shares one group per ref, so a new push to the PR replaces the old run.
+  # A push to main gets a group per commit, so no main commit's run is queued behind
+  # another one and cancelled: each one gets its own result.
+  group: oracle-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  oracle:
+    name: oracle
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          # full history: the secret scan also reads the commits the PR adds (origin/main..HEAD)
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Secret scan (PR-07)
+        # first, before npm ci adds files: it never prints a matched value
+        run: |
+          if [ -f loop/checks/secret-scan.sh ]; then
+            bash loop/checks/secret-scan.sh
+          else
+            echo "::warning title=secret scan did not run::loop/checks/secret-scan.sh is not in this commit"
+          fi
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/attendance/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/attendance
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: apps/attendance
+        run: npx playwright install --with-deps chromium
+
+      - name: Gate (lint + typecheck + unit)
+        run: npm --prefix apps/attendance run check
+
+      - name: AC coverage, no skipped tests (AC-40)
+        run: bash apps/attendance/scripts/check-ac-coverage.sh
+
+      - name: E2E (Playwright, Chromium, test-mode dev server on port 3100)
+        run: npm --prefix apps/attendance run e2e
+
+      - name: Production build has no test mode (AC-36)
+        run: bash apps/attendance/scripts/check-prod-no-test-mode.sh
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}-${{ github.run_attempt }}
+          # the json reporter writes test-results/e2e.json; traces are kept there on failure
+          path: |
+            apps/attendance/test-results/
+            apps/attendance/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security bypass privately
+    url: https://github.com/AQaddora/loop-lab/security/advisories/new
+    about: An anti-cheat bypass is a vulnerability. Report it privately, never in a public issue. See SECURITY.md.
+  - name: Ask the loop holder a question
+    url: https://github.com/AQaddora/loop-lab/blob/main/loop/decisions.md
+    about: Questions go to a decision entry in loop/decisions.md, added in a PR. See CONTRIBUTING.md.
+  - name: The workshop
+    url: https://mahranbayed.com/ai-talent-lab/?section=the-loop-workshop
+    about: The Loop in Practice, the workshop this repo was built in.
