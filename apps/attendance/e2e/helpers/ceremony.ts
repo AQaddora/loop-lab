@@ -92,3 +92,15 @@ export async function punch(
     return { ...v, sent, optionsStatus: 200 };
   }, { kind, postKind: opts.postKind ?? null, extra: opts.extra ?? {}, headers: opts.headers ?? {} });
 }
+
+/** Options + signature only (no POST), so a test can move the clock or swap cookies before posting. */
+export async function signPunch(page: Page, kind: "IN" | "OUT"): Promise<{ status: number; body: Record<string, unknown> & { error?: string }; sent?: { kind: string; response: unknown } }> {
+  return page.evaluate(async ({ kind }) => {
+    const r = await fetch("/api/punch/options", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind }) });
+    const b = (await r.json()) as Record<string, unknown>;
+    if (r.status !== 200) return { status: r.status, body: b };
+    const PKC = PublicKeyCredential as unknown as { parseRequestOptionsFromJSON(o: unknown): PublicKeyCredentialRequestOptions };
+    const cred = await navigator.credentials.get({ publicKey: PKC.parseRequestOptionsFromJSON((b as { options: unknown }).options) });
+    return { status: 200, body: b, sent: { kind, response: (cred as unknown as { toJSON(): unknown }).toJSON() } };
+  }, { kind });
+}

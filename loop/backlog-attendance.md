@@ -55,7 +55,7 @@ The spec was revised on 2026-11-17 by an adversarial review after T01–T05 had 
 - [x] T11 · Check-in / check-out (punch) + atomic commit + /me history — deps: T10, T18 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-19 AC-21 AC-22 AC-27 AC-41 && npm --prefix apps/attendance test -- tests/unit/punch-commit.test.ts && npm --prefix apps/attendance run e2e`
   /api/punch/options (steps 1, 2, 3, 5, 6; challenge bound to member + ticket + kind) + /api/punch running §2.5 in its exact order; steps 9–10 = `commitPunch()` in src/lib/punch.ts, one synchronous tx with no `await`.
   /punch shows the one valid action; /me + /api/me/events; the punch half of e2e/helpers/ceremony.ts. AC-19, AC-21, AC-22, AC-27, AC-41.
-- [ ] T20 · Punch abuse: replay, tickets, IP re-check, rate limits — deps: T11 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-23 AC-24 AC-25 AC-34 && npm --prefix apps/attendance run e2e`
+- [x] T20 · Punch abuse: replay, tickets, IP re-check, rate limits — deps: T11 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-23 AC-24 AC-25 AC-34 && npm --prefix apps/attendance run e2e`
   e2e/abuse.spec.ts: challenge reuse / expiry / kind mismatch; counter regression (CDP removeCredential + addCredential with signCount 0); ticket reuse, copy and absence; IP switch; both rate-limit rows of §2.7.
   Fix what they expose in app code (e.g. the library's counter error → `counter_regression` + audit), never in tests. AC-23, AC-24, AC-25, AC-34.
 - [ ] T12 · New-device re-registration on the same Google account — deps: T11 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-26 && npm --prefix apps/attendance run e2e`

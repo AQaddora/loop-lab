@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 import type { APIResponse } from "@playwright/test";
 import { approvedEmployee, BASE_URL, FX, get, loginAs, mintQr, myEvents, onboardAndEnroll, patch, post, reset, scan, setClock, signedIn } from "./helpers/api";
-import { punch } from "./helpers/ceremony";
-import { addAuthenticator } from "./helpers/webauthn";
+import { postFromPage, punch, signPunch } from "./helpers/ceremony";
+import { addAuthenticator, credentialsOf } from "./helpers/webauthn";
 
 const dataError = async (res: APIResponse) => /data-error="([a-z_]+)"/.exec(await res.text())?.[1];
 const setCookies = (res: APIResponse) => res.headersArray().filter((h) => h.name.toLowerCase() === "set-cookie").map((h) => h.value);
@@ -135,6 +135,178 @@ test.describe("abuse", () => {
     // and an OUT right after the IN is too soon, an OUT without IN is not_in
     expect((await myEvents(emp)).map((e) => e.kind)).toEqual(["IN"]);
     await emp.close();
+  });
+
+
+  test("AC-23 replayed challenge rejected: re-POST of a successful punch body -> challenge_used", async ({ browser, request }) => {
+    await setClock(request, { fixedMs: Date.parse("2026-11-17T08:00:05.000Z") });
+    const { emp, page } = await approvedEmployee(browser, FX.emp1);
+    await page.goto("/");
+    const ok = await punch(page, "IN");
+    expect(ok.status).toBe(201);
+    const replay = await postFromPage(page, "/api/punch", ok.sent);
+    expect(replay.status).toBe(409);
+    expect(replay.body.error).toBe("challenge_used");
+    expect((await myEvents(emp)).length).toBe(1);
+    await emp.close();
+  });
+
+  test("AC-23 replayed challenge rejected: an assertion posted after +61 s -> challenge_expired", async ({ browser, request }) => {
+    const T0 = Date.parse("2026-11-17T08:00:05.000Z");
+    await setClock(request, { fixedMs: T0 });
+    const { emp, page } = await approvedEmployee(browser, FX.emp1);
+    await page.goto("/");
+    const signed = await signPunch(page, "IN");
+    expect(signed.status).toBe(200);
+    await setClock(request, { fixedMs: T0 + 61_000 });
+    const late = await postFromPage(page, "/api/punch", signed.sent);
+    expect(late.status).toBe(410);
+    expect(late.body.error).toBe("challenge_expired");
+    expect(await myEvents(emp)).toEqual([]);
+    await emp.close();
+  });
+
+  test("AC-23 replayed challenge rejected: options for {kind:'IN'} posted with kind:'OUT' -> challenge_invalid", async ({ browser, request }) => {
+    await setClock(request, { fixedMs: Date.parse("2026-11-17T08:00:05.000Z") });
+    const { emp, page } = await approvedEmployee(browser, FX.emp1);
+    await page.goto("/");
+    const r = await punch(page, "IN", { postKind: "OUT" });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("challenge_invalid");
+    // a challenge minted for another member is invalid too
+    const other = await approvedEmployee(browser, FX.emp2);
+    await other.page.goto("/");
+    const signedByOther = await signPunch(other.page, "IN");
+    const swapped = await postFromPage(page, "/api/punch", signedByOther.sent);
+    expect(swapped.body.error).toBe("challenge_invalid");
+    for (const c of [emp, other.emp]) await c.close();
+  });
+
+  test("AC-23 replayed challenge rejected: a re-added credential with a lower sign counter -> counter_regression + audit row", async ({ browser, request }) => {
+    const T0 = Date.parse("2026-11-17T08:00:05.000Z");
+    await setClock(request, { fixedMs: T0 });
+    const admin = await signedIn(browser, FX.admin);
+    const { emp, page, auth, credId } = await approvedEmployee(browser, FX.emp1, admin);
+    await page.goto("/");
+    expect((await punch(page, "IN")).status).toBe(201);
+    // clone the passkey with signCount 0 (CDP: get -> remove -> add the same private key)
+    const [cred] = await credentialsOf(auth.cdp, auth.authenticatorId);
+    expect(cred.signCount).toBeGreaterThan(0);
+    await auth.cdp.send("WebAuthn.removeCredential", { authenticatorId: auth.authenticatorId, credentialId: cred.credentialId });
+    await auth.cdp.send("WebAuthn.addCredential", { authenticatorId: auth.authenticatorId, credential: { ...cred, signCount: 0 } });
+    await setClock(request, { fixedMs: T0 + 61_000 });
+    expect((await scan(emp, FX.hq, FX.ip.inV4)).status).toBe(303);
+    const r = await punch(page, "OUT");
+    expect(r.status, JSON.stringify(r.body)).toBe(409);
+    expect(r.body.error).toBe("counter_regression");
+    const audit = await get<{ entries: { action: string; targetId: string }[] }>(admin, "/api/admin/audit?action=credential.counter_regression");
+    expect(audit.body.entries).toEqual([expect.objectContaining({ action: "credential.counter_regression", targetId: credId })]);
+    expect((await myEvents(emp)).map((e) => e.kind)).toEqual(["IN"]);
+    for (const c of [emp, admin]) await c.close();
+  });
+
+  test("AC-24 ticket single-use: a used ticket -> ticket_used; no ticket -> ticket_missing", async ({ browser, request }) => {
+    const T0 = Date.parse("2026-11-17T08:00:05.000Z");
+    await setClock(request, { fixedMs: T0 });
+    const { emp, page } = await approvedEmployee(browser, FX.emp1);
+    await page.goto("/");
+    expect((await punch(page, "IN")).status).toBe(201);
+    await setClock(request, { fixedMs: T0 + 61_000 });
+    // same cookie, no new scan
+    const reused = await punch(page, "OUT");
+    expect(reused.status).toBe(409);
+    expect(reused.body.error).toBe("ticket_used");
+    // no ticket at all
+    await emp.clearCookies({ name: "scan_ticket" });
+    const none = await punch(page, "OUT");
+    expect(none.status).toBe(428);
+    expect(none.body.error).toBe("ticket_missing");
+    await emp.close();
+  });
+
+  test("AC-24 ticket single-use: a ticket cookie copied into another member's session -> ticket_other_user", async ({ browser, request }) => {
+    await setClock(request, { fixedMs: Date.parse("2026-11-17T08:00:05.000Z") });
+    const one = await approvedEmployee(browser, FX.emp1);
+    const two = await approvedEmployee(browser, FX.emp2);
+    await one.page.goto("/");
+    await two.page.goto("/");
+    // emp1 binds a fresh ticket by asking for options
+    expect((await scan(one.emp, FX.hq, FX.ip.inV4)).status).toBe(303);
+    expect((await signPunch(one.page, "IN")).status).toBe(200);
+    const ticket = (await one.emp.cookies()).find((c) => c.name.endsWith("scan_ticket"))!;
+    await two.emp.addCookies([{ ...ticket }]);
+    const atOptions = await punch(two.page, "IN");
+    expect(atOptions.status).toBe(403);
+    expect(atOptions.body.error).toBe("ticket_other_user");
+    // emp1 can still use it
+    expect((await punch(one.page, "IN")).status).toBe(201);
+    for (const c of [one.emp, two.emp]) await c.close();
+  });
+
+  test("AC-25 ip rechecked at punch: IP switched to outside between scan and punch -> ip_not_allowed", async ({ browser, request }) => {
+    await setClock(request, { fixedMs: Date.parse("2026-11-17T08:00:05.000Z") });
+    const { emp, page } = await approvedEmployee(browser, FX.emp1);
+    await page.goto("/");
+    // between scan and options
+    await emp.setExtraHTTPHeaders({ "x-test-client-ip": FX.ip.out });
+    const atOptions = await punch(page, "IN");
+    expect(atOptions.status).toBe(403);
+    expect(atOptions.body.error).toBe("ip_not_allowed");
+    // between options and the punch itself
+    await emp.setExtraHTTPHeaders({ "x-test-client-ip": FX.ip.inV4 });
+    await page.route("**/api/punch", async (route) => {
+      await route.continue({ headers: { ...route.request().headers(), "x-test-client-ip": FX.ip.out } });
+    });
+    const atPunch = await punch(page, "IN");
+    expect(atPunch.optionsStatus).toBe(200);
+    expect(atPunch.status).toBe(403);
+    expect(atPunch.body.error).toBe("ip_not_allowed");
+    // another office's network does not count either
+    await page.unroute("**/api/punch");
+    await emp.setExtraHTTPHeaders({ "x-test-client-ip": FX.ip.whIn });
+    expect((await punch(page, "IN")).body.error).toBe("ip_not_allowed");
+    expect(await myEvents(emp)).toEqual([]);
+    await emp.close();
+  });
+
+  test("AC-34 rate limit: the 11th /api/punch/options within 60 s -> rate_limited", async ({ browser, request }) => {
+    const T0 = Date.parse("2026-11-17T08:00:05.000Z");
+    await setClock(request, { fixedMs: T0 });
+    const { emp } = await approvedEmployee(browser, FX.emp1);
+    // a fresh minute window (enrolment already used part of this member's 10/min)
+    await setClock(request, { fixedMs: T0 + 60_000 });
+    for (let i = 1; i <= 10; i++) {
+      const r = await post(emp, "/api/punch/options", { kind: "IN" });
+      expect(r.status, `call ${i}`).toBe(200);
+    }
+    const eleventh = await post(emp, "/api/punch/options", { kind: "IN" });
+    expect(eleventh.status).toBe(429);
+    expect(eleventh.body.error).toBe("rate_limited");
+    // the bucket covers /api/punch too, and resets in the next window
+    expect((await post(emp, "/api/punch", { kind: "IN", response: {} })).body.error).toBe("rate_limited");
+    await setClock(request, { fixedMs: T0 + 120_000 });
+    expect((await post(emp, "/api/punch/options", { kind: "IN" })).status).toBe(200);
+    await emp.close();
+  });
+
+  test("AC-34 rate limit: the 31st /s/* request within 60 s from an outside IP -> rate_limited; 31 from an inside IP are not", async ({ request }) => {
+    await setClock(request, { fixedMs: Date.parse("2026-11-17T08:00:05.000Z") });
+    const qr = await mintQr(request, FX.hq);
+    const hitS = (ip: string) => request.get(qr.url, { headers: { "x-test-client-ip": ip }, maxRedirects: 0 });
+    for (let i = 1; i <= 30; i++) {
+      const r = await hitS(FX.ip.out);
+      expect(r.status(), `outside ${i}`).toBe(403); // ip_not_allowed, but counted
+    }
+    const thirtyFirst = await hitS(FX.ip.out);
+    expect(thirtyFirst.status()).toBe(429);
+    expect(await dataError(thirtyFirst)).toBe("rate_limited");
+    for (let i = 1; i <= 31; i++) {
+      const r = await hitS(FX.ip.inV4);
+      expect(r.status(), `inside ${i}`).toBe(303);
+    }
+    // /api/client-ip shares the outside bucket
+    const ip = await request.get("/api/client-ip", { headers: { "x-test-client-ip": FX.ip.out } });
+    expect(ip.status()).toBe(429);
   });
 
 });
