@@ -116,6 +116,15 @@ const NON_PUBLIC = new Set([
   "uniqueLocal",
 ]);
 
+/** Tailscale's tailnet IPv4 block (CGNAT space). Only reachable through parseCidr's ALLOW_TAILNET_CIDRS branch. */
+const TAILNET_V4 = ipaddr.IPv4.parse("100.64.0.0");
+const TAILNET_V4_BITS = 10;
+
+/** ALLOW_TAILNET_CIDRS must be exactly "1"; anything else (unset, "true", " 1") keeps the strict policy. */
+export function tailnetCidrsAllowed(env: Env = process.env): boolean {
+  return env.ALLOW_TAILNET_CIDRS === "1";
+}
+
 function lastAddress(net: ipaddr.IPv4 | ipaddr.IPv6, bits: number): ipaddr.IPv4 | ipaddr.IPv6 {
   const cidr = `${net.toString()}/${bits}`;
   return net.kind() === "ipv4" ? ipaddr.IPv4.broadcastAddressFromCIDR(cidr) : ipaddr.IPv6.broadcastAddressFromCIDR(cidr);
@@ -129,8 +138,20 @@ function lastAddress(net: ipaddr.IPv4 | ipaddr.IPv6, bits: number): ipaddr.IPv4 
  *   cidr_not_public a network address whose range() is non-public
  * Documentation ranges (range "reserved": 198.51.100.0/24, 2001:db8::/32) are accepted.
  * The "whole block" test runs first so 10.0.0.0/8 reads as not public while /0 reads as too broad (AC-03).
+ *
+ * Tailnet staging only (holder decision D-003): with ALLOW_TAILNET_CIDRS=1, a block that lies wholly inside
+ * Tailscale's 100.64.0.0/10 (prefix /10 or longer) is accepted, because behind Tailscale Serve every caller
+ * arrives with a tailnet IP. Every other non-public range, and anything that only overlaps 100.64.0.0/10,
+ * keeps the rules above. Unset (or any value but "1") in production.
+ *
+ * One argument only, so `cidrs.map(parseCidr)` stays safe; parseCidrWithEnv() takes an explicit env.
  */
 export function parseCidr(input: string): string {
+  return parseCidrWithEnv(input, process.env);
+}
+
+/** parseCidr() with an explicit env (ALLOW_TAILNET_CIDRS). */
+export function parseCidrWithEnv(input: string, env: Env): string {
   if (typeof input !== "string") throw new AppError("cidr_invalid");
   const m = /^([^/\s]+)\/(\d{1,3})$/.exec(input.trim());
   if (!m) throw new AppError("cidr_invalid");
@@ -146,6 +167,9 @@ export function parseCidr(input: string): string {
     net = ipaddr.IPv6.networkAddressFromCIDR(`${m[1]}/${bits}`);
   } else {
     throw new AppError("cidr_invalid");
+  }
+  if (tailnetCidrsAllowed(env) && net.kind() === "ipv4" && bits >= TAILNET_V4_BITS && (net as ipaddr.IPv4).match(TAILNET_V4, TAILNET_V4_BITS)) {
+    return `${net.toString()}/${bits}`;
   }
   const first = net.range();
   const last = lastAddress(net, bits).range();
