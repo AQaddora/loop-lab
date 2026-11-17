@@ -211,3 +211,10 @@ marks the task `- [!]` if it blocks one, and then takes the next unblocked task 
 - recommendation: A. A public repo plus auto-deploy means anyone's PR would reach production without a human; the oracle cannot judge intent.
 - answer: (holder, 2026-11-17, picked "Holder approves (Recommended)") **A.** `main` will require the CI `oracle` check and a CODEOWNER (holder) review for PRs, with force-push off. Task P05 sets this up once the repo is public. The repo owner's own loop commits are not blocked (enforce_admins off). Trainees fork and open PRs.
 
+
+## D-025 · DEPLOY · Deploy of feeb435d88d9 failed its deploy check, and deploys are paused. How does the loop resume?
+- app: attendance | status: OPEN
+- context: loop/deploy/ship.sh ran dokku git:from-image with loop-lab-attendance:feeb435d88d9 for https://attendance.apps.taqat.academy (run started 2026-11-17T22:30:27Z). Reason: deploy red on feeb435d88d9: dokku git:from-image exit 1. Rollback: no previous image to roll back to. No deploy runs while loop/.deploy-paused exists (specs/prod-loop.md 4.1 step 6).
+- options: A) Fix forward: keep the pause until a fix for this failure is on main, with a test that would have caught it in CI (specs/prod-loop.md 4.4), then delete loop/.deploy-paused. B) Retry as is: delete loop/.deploy-paused now, and the next deploy runs the same checks on feeb435d88d9 again.
+- recommendation: A. A check that fails after release found something the build oracle missed. First check by hand what is live: the rollback did not end green.
+- answer: _(loop holder writes here)_
