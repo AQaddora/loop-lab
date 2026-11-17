@@ -1,7 +1,7 @@
-import type { NextRequest } from "next/server";
+import { NextRequest } from "next/server";
 import { handlers } from "@/auth";
 import { getDb } from "@/db";
-import { withBase } from "@/lib/base-path";
+import { restoreBasePath, withBase } from "@/lib/base-path";
 import { nowMs } from "@/lib/clock";
 import { clientIp } from "@/lib/ip";
 import { hitIp } from "@/lib/ratelimit";
@@ -22,10 +22,16 @@ function limited(req: NextRequest): Response | null {
   return Response.redirect(new URL(withBase("/signin?error=rate_limited"), req.nextUrl.origin), 303);
 }
 
+// With BASE_PATH set, Auth.js would see "/api/auth/…" under its "/attendance/api/auth" basePath (UnknownAction).
+function forAuth(req: NextRequest): NextRequest {
+  const href = restoreBasePath(req.nextUrl.href);
+  return href === req.nextUrl.href ? req : new NextRequest(href, req);
+}
+
 export async function GET(req: NextRequest) {
-  return limited(req) ?? handlers.GET(req);
+  return limited(req) ?? handlers.GET(forAuth(req));
 }
 
 export async function POST(req: NextRequest) {
-  return limited(req) ?? handlers.POST(req);
+  return limited(req) ?? handlers.POST(forAuth(req));
 }

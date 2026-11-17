@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db";
 import { sites } from "@/db/schema";
-import { basePath, withBase } from "@/lib/base-path";
+import { basePath } from "@/lib/base-path";
 import { currentMember } from "@/lib/session";
 import { siteView } from "@/lib/sites";
 import SiteClient from "./site-client";
@@ -14,7 +14,7 @@ type Props = { params: Promise<{ id: string }> };
 export default async function SitePage({ params }: Props) {
   const { id } = await params;
   const me = await currentMember();
-  if (!me) redirect(withBase(`/signin?callbackUrl=/admin/sites/${encodeURIComponent(id)}`));
+  if (!me) redirect(`/signin?callbackUrl=/admin/sites/${encodeURIComponent(id)}`);
   if (me.status !== "ACTIVE" || (me.role !== "admin" && me.role !== "owner")) return <main data-error="forbidden"><h1>Site</h1></main>;
   const db = getDb();
   const site = db.select().from(sites).where(and(eq(sites.id, id), eq(sites.orgId, me.orgId))).get();

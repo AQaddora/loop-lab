@@ -23,19 +23,20 @@ export default async function SignInPage({ searchParams }: Props) {
   const error = raw ? (raw in ERROR_STATUS ? raw : "auth_error") : undefined;
   const next = safeNext(first(sp.callbackUrl));
 
+  // Auth.js resolves redirectTo against the bare origin, so the base path goes in here
   async function google() {
     "use server";
-    await signIn("google", { redirectTo: next });
+    await signIn("google", { redirectTo: withBase(next) });
   }
 
   async function testLogin(fd: FormData) {
     "use server";
-    if (!isTestMode()) redirect(withBase("/signin"));
+    if (!isTestMode()) redirect("/signin");
     await signIn(TEST_LOGIN_ID, {
       email: String(fd.get("email") ?? ""),
       sub: String(fd.get("sub") ?? ""),
       emailVerified: fd.get("unverified") ? "false" : "true",
-      redirectTo: next,
+      redirectTo: withBase(next),
     });
   }
 

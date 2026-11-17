@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import QRCode from "qrcode";
 import { getDb } from "@/db";
 import { sites, staticQrCodes } from "@/db/schema";
-import { withBase } from "@/lib/base-path";
 import { currentMember } from "@/lib/session";
 import { scanUrl, staticToken } from "@/lib/static-qr";
 
@@ -15,7 +14,7 @@ type Props = { params: Promise<{ id: string; qrId: string }> };
 export default async function PrintQr({ params }: Props) {
   const { id, qrId } = await params;
   const me = await currentMember();
-  if (!me) redirect(withBase(`/signin?callbackUrl=/admin/sites/${encodeURIComponent(id)}/qr/${encodeURIComponent(qrId)}`));
+  if (!me) redirect(`/signin?callbackUrl=/admin/sites/${encodeURIComponent(id)}/qr/${encodeURIComponent(qrId)}`);
   if (me.status !== "ACTIVE" || (me.role !== "admin" && me.role !== "owner")) return <main data-error="forbidden" />;
   const db = getDb();
   const site = db.select().from(sites).where(and(eq(sites.id, id), eq(sites.orgId, me.orgId))).get();

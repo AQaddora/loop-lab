@@ -3,16 +3,15 @@ import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { orgs, sites } from "@/db/schema";
-import { withBase } from "@/lib/base-path";
 import { currentMember } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminHome() {
   const db = getDb();
-  if (!db.select({ id: orgs.id }).from(orgs).limit(1).get()) redirect(withBase("/admin/setup"));
+  if (!db.select({ id: orgs.id }).from(orgs).limit(1).get()) redirect("/admin/setup");
   const me = await currentMember();
-  if (!me) redirect(withBase("/signin?callbackUrl=/admin"));
+  if (!me) redirect("/signin?callbackUrl=/admin");
   if (me.status !== "ACTIVE" || (me.role !== "admin" && me.role !== "owner")) {
     return (
       <main data-error="forbidden">
