@@ -61,7 +61,7 @@ The spec was revised on 2026-11-17 by an adversarial review after T01–T05 had 
 - [x] T12 · New-device re-registration on the same Google account — deps: T11 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-26 && npm --prefix apps/attendance run e2e`
   /punch "New phone / passkey deleted" → /enroll even when an APPROVED credential exists; at most one PENDING (a newer one supersedes the older); flow §1.5.
   Test: new browser context + empty virtual authenticator + same email, approved with that context's confirm code; the old context proves `credential_revoked`. AC-26.
-- [ ] T13 · Kiosk pairing + rotating QR display — deps: T08 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-32 && npm --prefix apps/attendance run e2e`
+- [x] T13 · Kiosk pairing + rotating QR display — deps: T08 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-32 && npm --prefix apps/attendance run e2e`
   POST /api/admin/kiosks → 8-char one-time pairing code (10 min, hashed) → /kiosk/pair → POST /api/kiosk/pair (site IP only, 10/min per IP) → HttpOnly kiosk cookie (180 d, token hashed).
   /kiosk polls GET /api/kiosk/token (site IP only, returns serverNow) and hides the QR by server time (§1.2); `data-token` + `data-url`. The test drives page.clock + setClock, never real sleeps. AC-32.
 - [ ] T14 · Admin corrections, CSV export, chain verify — deps: T11 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-29 AC-30 && npm --prefix apps/attendance run e2e`

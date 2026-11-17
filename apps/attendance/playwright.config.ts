@@ -7,6 +7,7 @@ const baseURL = `http://localhost:${port}`;
 
 export default defineConfig({
   testDir: "./e2e",
+  globalSetup: "./e2e/global-setup.ts",
   fullyParallel: false,
   workers: 1,
   // WebAuthn journeys with several browser contexts take 20-30 s on a shared box
