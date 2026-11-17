@@ -27,7 +27,7 @@ The spec was revised on 2026-11-17 by an adversarial review after T01–T05 had 
 - [x] T06 · Auth.js (Google + allowlist policy) + test harness + prod guard — deps: T02, T03 — done when: `npm --prefix apps/attendance run e2e -- --grep "AC-(10|11)\b" && bash apps/attendance/scripts/check-prod-no-test-mode.sh`
   src/auth.ts: Google + gated `test-login`, JWT 12 h, one signIn policy for both (§2.3); /api/test/{reset,login,clock,qr,tamper} return 404 unless isTestMode(); fixture §7.3.
   e2e/helpers/api.ts (reset, loginAs, setClock, mintQr); scripts/check-prod-no-test-mode.sh per §7.4. AC-10, AC-11, AC-36.
-- [ ] T17 · AC coverage guard script — deps: T02 — done when: `npm --prefix apps/attendance test -- tests/unit/ac-coverage.test.ts && bash apps/attendance/scripts/check-ac-coverage.sh AC-01 AC-08 AC-40`
+- [x] T17 · AC coverage guard script — deps: T02 — done when: `npm --prefix apps/attendance test -- tests/unit/ac-coverage.test.ts && bash apps/attendance/scripts/check-ac-coverage.sh AC-01 AC-08 AC-40`
   scripts/check-ac-coverage.sh per spec §7.5: resolves paths from its own dir; AC ids from the §8 table (`SPEC=` override); titles in `test(` / `it(` / `describe(` under tests/ + e2e/ (`TEST_DIRS=` override).
   Script ACs (AC-36, AC-39) need their script to contain the id; no args = all except AC-39; always fails on .skip( .only( .fixme( test.todo xit( xdescribe( test.fail( passWithNoTests.
   tests/unit/ac-coverage.test.ts drives it against temp fixture dirs. AC-40.
