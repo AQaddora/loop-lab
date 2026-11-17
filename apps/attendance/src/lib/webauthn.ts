@@ -3,14 +3,17 @@
  */
 import { createHmac } from "node:crypto";
 import {
+  generateAuthenticationOptions,
   generateRegistrationOptions,
+  verifyAuthenticationResponse,
   verifyRegistrationResponse,
+  type AuthenticationResponseJSON,
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import { decodeAttestationObject, isoBase64URL, parseAuthenticatorData } from "@simplewebauthn/server/helpers";
 import { and, eq, inArray, isNull, gt } from "drizzle-orm";
 import type { DB } from "@/db";
-import { credentials, orgs, webauthnChallenges, type Member, type ScanTicket, type WebauthnChallenge } from "@/db/schema";
+import { credentials, orgs, webauthnChallenges, type Credential, type Member, type ScanTicket, type WebauthnChallenge } from "@/db/schema";
 import { AppError } from "./errors";
 import { randomB64url, randomId } from "./ids";
 
@@ -192,6 +195,56 @@ export async function verifyRegistration(db: DB, x: RegisterInput) {
     db.insert(credentials).values(row).run();
     return row;
   };
+}
+
+// ---- punch (authentication) ----------------------------------------------------------------------
+/** Discoverable (empty allowCredentials) + UV required: the server, not the browser, picks the credential. */
+export async function punchOptions(rp: RpConfig) {
+  return generateAuthenticationOptions({ rpID: rp.rpID, userVerification: "required", allowCredentials: [], timeout: 60_000 });
+}
+
+function assertionFlags(response: AuthenticationResponseJSON): { uv: boolean; counter: number } | null {
+  try {
+    const p = parseAuthenticatorData(isoBase64URL.toBuffer(response.response.authenticatorData));
+    return { uv: p.flags.uv, counter: p.counter };
+  } catch {
+    return null;
+  }
+}
+
+export type AssertionResult = { newCounter: number; counterRegression: false } | { newCounter: number; counterRegression: true };
+
+/**
+ * Step 7 (spec §2.4): verify the assertion against the stored public key with UV required. The library gets
+ * counter 0 so it never throws for counters; the counter rule is applied here instead (stored > 0 or new > 0
+ * -> new must be > stored), so a regression is reported as counter_regression, never assertion_invalid.
+ * Library UV failure -> uv_required; any other failure -> assertion_invalid.
+ */
+export async function verifyAssertion(cred: Credential, response: AuthenticationResponseJSON, expectedChallenge: string, rp: RpConfig): Promise<AssertionResult> {
+  let newCounter: number;
+  try {
+    const v = await verifyAuthenticationResponse({
+      response,
+      expectedChallenge,
+      expectedOrigin: rp.origin,
+      expectedRPID: rp.rpID,
+      credential: {
+        id: cred.credentialId,
+        publicKey: isoBase64URL.toBuffer(cred.publicKey),
+        counter: 0,
+        transports: cred.transports ? (JSON.parse(cred.transports) as never) : undefined,
+      },
+      requireUserVerification: true,
+    });
+    if (!v.verified) throw new AppError("assertion_invalid");
+    if (!v.authenticationInfo.userVerified) throw new AppError("uv_required");
+    newCounter = v.authenticationInfo.newCounter;
+  } catch (e) {
+    if (e instanceof AppError) throw e;
+    throw new AppError(assertionFlags(response)?.uv === false ? "uv_required" : "assertion_invalid");
+  }
+  const regression = (cred.counter > 0 || newCounter > 0) && newCounter <= cred.counter;
+  return { newCounter, counterRegression: regression } as AssertionResult;
 }
 
 export { randomB64url };

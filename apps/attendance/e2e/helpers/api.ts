@@ -185,3 +185,27 @@ export async function approve(adminCtx: Req, credId: string, confirmCode: string
   expect(r.status, JSON.stringify(r.body)).toBe(200);
   return r;
 }
+
+/**
+ * An employee with an APPROVED passkey on `page`'s virtual authenticator, a fresh HQ ticket and the inside IP.
+ * Returns the employee context and the credential id.
+ */
+export async function approvedEmployee(browser: import("@playwright/test").Browser, email: keyof typeof PROFILE, adminCtx?: BrowserContext) {
+  const emp = await signedIn(browser, email);
+  const page = await emp.newPage();
+  const { addAuthenticator } = await import("./webauthn");
+  const auth = await addAuthenticator(page);
+  const { credId, confirmCode } = await onboardAndEnroll(page, email);
+  const admin = adminCtx ?? (await signedIn(browser, "admin@acme.test"));
+  await approve(admin, credId, confirmCode);
+  if (!adminCtx) await admin.close();
+  return { emp, page, credId, auth };
+}
+
+export type MyEvent = { seq: number; kind: string; source: string; effectiveAt: number; recordedAt: number; reason: string | null; correctsSeq: number | null; voided: boolean };
+
+export async function myEvents(ctx: Req) {
+  const r = await get<{ events: MyEvent[] }>(ctx, "/api/me/events");
+  expect(r.status).toBe(200);
+  return r.body.events;
+}

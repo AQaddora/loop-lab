@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import type { APIResponse } from "@playwright/test";
-import { BASE_URL, FX, loginAs, mintQr, patch, post, reset, setClock, signedIn } from "./helpers/api";
+import { approvedEmployee, BASE_URL, FX, get, loginAs, mintQr, myEvents, onboardAndEnroll, patch, post, reset, scan, setClock, signedIn } from "./helpers/api";
+import { punch } from "./helpers/ceremony";
+import { addAuthenticator } from "./helpers/webauthn";
 
 const dataError = async (res: APIResponse) => /data-error="([a-z_]+)"/.exec(await res.text())?.[1];
 const setCookies = (res: APIResponse) => res.headersArray().filter((h) => h.name.toLowerCase() === "set-cookie").map((h) => h.value);
@@ -100,4 +102,39 @@ test.describe("abuse", () => {
     expect(violations).toEqual([]);
     await ctx.close();
   });
+
+  test("AC-19 pending credential cannot check in: the ceremony completes but -> credential_pending, no event row", async ({ browser }) => {
+    const emp = await signedIn(browser, FX.emp1);
+    const page = await emp.newPage();
+    await addAuthenticator(page);
+    await onboardAndEnroll(page, FX.emp1);
+    await page.goto("/");
+    const r = await punch(page, "IN");
+    expect(r.optionsStatus).toBe(200); // the ceremony itself ran
+    expect(r.status, JSON.stringify(r.body)).toBe(403);
+    expect(r.body.error).toBe("credential_pending");
+    expect(await myEvents(emp)).toEqual([]);
+    const admin = await signedIn(browser, FX.admin);
+    expect((await get(admin, "/api/admin/attendance/verify")).body).toEqual({ ok: true, firstBadSeq: null });
+    for (const c of [emp, admin]) await c.close();
+  });
+
+  test("AC-22 double check-in rejected: a second IN without OUT (fresh ticket + challenge) -> already_in", async ({ browser, request }) => {
+    const T0 = Date.parse("2026-11-17T08:00:05.000Z");
+    await setClock(request, { fixedMs: T0 });
+    const { emp, page } = await approvedEmployee(browser, FX.emp1);
+    await page.goto("/");
+    expect((await punch(page, "IN")).status).toBe(201);
+    for (const later of [5_000, 61_000, 4 * 3_600_000]) {
+      await setClock(request, { fixedMs: T0 + later });
+      expect((await scan(emp, FX.hq, FX.ip.inV4)).status).toBe(303);
+      const again = await punch(page, "IN");
+      expect(again.status, `+${later}`).toBe(409);
+      expect(again.body.error, `+${later}`).toBe("already_in");
+    }
+    // and an OUT right after the IN is too soon, an OUT without IN is not_in
+    expect((await myEvents(emp)).map((e) => e.kind)).toEqual(["IN"]);
+    await emp.close();
+  });
+
 });
