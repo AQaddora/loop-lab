@@ -67,7 +67,7 @@ The spec was revised on 2026-11-17 by an adversarial review after T01–T05 had 
 - [x] T14 · Admin corrections, CSV export, chain verify — deps: T11 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-29 AC-30 && npm --prefix apps/attendance run e2e`
   POST /api/admin/attendance/corrections (VOID / IN / OUT rules in §2.6, reason 3–500 chars, no self-correction); GET export.csv with formula escaping; GET verify → `{ok, firstBadSeq}`; /admin/attendance UI.
   AC-29 uses /api/test/tamper. AC-29, AC-30.
-- [ ] T15 · Full E2E journey + whole-suite convergence — deps: T12, T13, T14, T20 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh && npm --prefix apps/attendance run check && npm --prefix apps/attendance run e2e && bash apps/attendance/scripts/check-prod-no-test-mode.sh`
+- [x] T15 · Full E2E journey + whole-suite convergence — deps: T12, T13, T14, T20 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh && npm --prefix apps/attendance run check && npm --prefix apps/attendance run e2e && bash apps/attendance/scripts/check-prod-no-test-mode.sh`
   e2e/journey.spec.ts (AC-37) from the `empty` fixture: admin steps via /api/admin/*, employee steps via the UI, `test-login` stands in for Google. Fix whatever it exposes in app code, not in tests.
   No-arg coverage = every AC in spec §8 except AC-39. AC-37.
 - [!] T16 · Staging deploy (HTTPS) + remote smoke — deps: T15 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-39 && bash apps/attendance/scripts/smoke-remote.sh "$(cat apps/attendance/deploy/STAGING_URL)"`
