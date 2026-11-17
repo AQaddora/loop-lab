@@ -136,3 +136,5 @@ The script printed only the names of the checks and the counts, never a value.
 ## Note on two commit ids
 
 Before the first push, two unpushed commits from the tailnet-mirror work were rewritten so that the public history holds no fleet identifiers. Only test fixture values changed: a real tailnet IP and a real host name in two unit tests. `7f29e7c` became `115f117` and `1a69c9f` became `30b656e`. Older ledger lines still name the old ids. A ledger `fixed` event at 22:09 UTC records the mapping.
+
+A second rewrite, also before publication, took salted hashes of private host names out of `loop/checks/secret-scan.sh`, because short names can be guessed back from a hash. The names now live only in a host-local list. Ids: `72270b2` became `b68bd15`, `2a21bbe` became `1405939`, `c145e3a` became `4ee1394` and `f13fcd0` became `a2090af`. A ledger `fixed` event records this mapping too.
