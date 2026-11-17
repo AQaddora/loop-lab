@@ -15,7 +15,7 @@ A done-when must FAIL before the work and PASS after. Never skip or weaken an AC
 - [x] T03 · Drizzle schema + migrations (SQLite) + append-only triggers — deps: T01 — done when: `npm --prefix apps/attendance run typecheck && npm --prefix apps/attendance test -- tests/unit/db-append-only.test.ts`
   All tables, columns, statuses and partial unique indexes from §4 in src/db/schema.ts; custom migration adds BEFORE UPDATE/DELETE triggers on attendance_events + audit_log.
   tests/helpers/db.ts = fresh in-memory DB with migrations; add db:generate/db:migrate and wire migrate into dev:test. AC-28.
-- [ ] T04 · Client IP + CIDR allowlist + QR token primitives — deps: T02 — done when: `npm --prefix apps/attendance test -- tests/unit/ip.test.ts tests/unit/qr.test.ts`
+- [x] T04 · Client IP + CIDR allowlist + QR token primitives — deps: T02 — done when: `npm --prefix apps/attendance test -- tests/unit/ip.test.ts tests/unit/qr.test.ts`
   src/lib/ip.ts `clientIp(headers)` + `ipAllowed(ip, cidrs)` via ipaddr.js (§2.2); src/lib/qr.ts mint/verify rotating + static with HMAC-SHA256 + timingSafeEqual (§2.1).
   Pure functions, clock injected. AC-02, AC-03, AC-04, AC-05.
 - [ ] T05 · Hash chain, punch state machine, rate limiter — deps: T03 — done when: `npm --prefix apps/attendance test -- tests/unit/chain.test.ts tests/unit/punch-state.test.ts tests/unit/ratelimit.test.ts`
