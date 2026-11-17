@@ -58,7 +58,7 @@ The spec was revised on 2026-11-17 by an adversarial review after T01–T05 had 
 - [x] T20 · Punch abuse: replay, tickets, IP re-check, rate limits — deps: T11 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-23 AC-24 AC-25 AC-34 && npm --prefix apps/attendance run e2e`
   e2e/abuse.spec.ts: challenge reuse / expiry / kind mismatch; counter regression (CDP removeCredential + addCredential with signCount 0); ticket reuse, copy and absence; IP switch; both rate-limit rows of §2.7.
   Fix what they expose in app code (e.g. the library's counter error → `counter_regression` + audit), never in tests. AC-23, AC-24, AC-25, AC-34.
-- [ ] T12 · New-device re-registration on the same Google account — deps: T11 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-26 && npm --prefix apps/attendance run e2e`
+- [x] T12 · New-device re-registration on the same Google account — deps: T11 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-26 && npm --prefix apps/attendance run e2e`
   /punch "New phone / passkey deleted" → /enroll even when an APPROVED credential exists; at most one PENDING (a newer one supersedes the older); flow §1.5.
   Test: new browser context + empty virtual authenticator + same email, approved with that context's confirm code; the old context proves `credential_revoked`. AC-26.
 - [ ] T13 · Kiosk pairing + rotating QR display — deps: T08 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-32 && npm --prefix apps/attendance run e2e`

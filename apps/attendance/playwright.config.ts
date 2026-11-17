@@ -9,6 +9,8 @@ export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
   workers: 1,
+  // WebAuthn journeys with several browser contexts take 20-30 s on a shared box
+  timeout: 60_000,
   retries: 0,
   forbidOnly: true,
   reporter: [["list"], ["json", { outputFile: "test-results/e2e.json" }]],
