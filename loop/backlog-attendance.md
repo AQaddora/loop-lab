@@ -49,7 +49,7 @@ The spec was revised on 2026-11-17 by an adversarial review after T01–T05 had 
 - [x] T09 · Onboarding profile + passkey registration (PENDING) — deps: T08 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-16 AC-17 AC-18 AC-35 && npm --prefix apps/attendance run e2e`
   /onboarding + POST /api/profile (§1.3.4); /enroll + /api/webauthn/register/{options,verify} exactly as §2.4: binds the ticket, IP checked at both steps, an older PENDING superseded, synced policy from orgs.
   Waiting screen shows `data-confirm-code` from /api/me/state. e2e/helpers/webauthn.ts + the registration half of e2e/helpers/ceremony.ts (UV `discouraged` override for AC-18, §7.1). AC-16, AC-17, AC-18, AC-35.
-- [ ] T10 · Admin credential approvals with confirm code (approve / reject / revoke) — deps: T09 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-20 && npm --prefix apps/attendance run e2e`
+- [x] T10 · Admin credential approvals with confirm code (approve / reject / revoke) — deps: T09 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-20 && npm --prefix apps/attendance run e2e`
   /admin/credentials queue shows UA, IP, site, time, AAGUID and the synced flag, never the confirm code; approve body `{confirmCode}`; one tx: previous APPROVED → REVOKED, then target → APPROVED.
   State rules + codes per §2.4 (`invalid_state`, `forbidden_self_action`, `confirm_code_mismatch`); every decision goes to audit_log. AC-20.
 - [ ] T11 · Check-in / check-out (punch) + atomic commit + /me history — deps: T10, T18 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-19 AC-21 AC-22 AC-27 AC-41 && npm --prefix apps/attendance test -- tests/unit/punch-commit.test.ts && npm --prefix apps/attendance run e2e`

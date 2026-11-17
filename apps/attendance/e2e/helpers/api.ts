@@ -162,3 +162,26 @@ export async function queue(adminCtx: Req, status?: string) {
   expect(r.status).toBe(200);
   return { items: r.body.credentials, raw: JSON.stringify(r.body) };
 }
+
+/**
+ * Spec §7.3 helper: onboard `email`, scan HQ from inside, register a passkey on `page` (which must have a virtual
+ * authenticator) and return the new credential id + the confirm code shown on the phone.
+ */
+export async function onboardAndEnroll(page: import("@playwright/test").Page, email: keyof typeof PROFILE, siteId = "site_hq", ip = "198.51.100.23") {
+  const ctx = page.context();
+  await ctx.setExtraHTTPHeaders({ "x-test-client-ip": ip });
+  const st = await get<{ member: { profileComplete: boolean } }>(ctx, "/api/me/state");
+  if (!st.body.member?.profileComplete) await onboard(ctx, email);
+  expect((await scan(ctx, siteId, ip)).status).toBe(303);
+  if (page.url() === "about:blank") await page.goto("/");
+  const { register } = await import("./ceremony");
+  const r = await register(page);
+  expect(r.status, JSON.stringify(r.body)).toBe(201);
+  return { credId: (r.body.credential as { id: string }).id, confirmCode: r.body.confirmCode as string };
+}
+
+export async function approve(adminCtx: Req, credId: string, confirmCode: string) {
+  const r = await post(adminCtx, `/api/admin/credentials/${credId}/approve`, { confirmCode });
+  expect(r.status, JSON.stringify(r.body)).toBe(200);
+  return r;
+}
