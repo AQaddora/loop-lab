@@ -89,13 +89,31 @@ function hexEqual(a: string, b: string): boolean {
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
+export type VerifyOptions = {
+  /** chain_heads row: rows beyond it, or a head whose hash differs, fail (same-DB, so a weak check) */
+  head?: ChainHead | null;
+  /** a past checkpoint kept outside the DB (OD-6): missing or different at anchor.seq -> fails there (tail cut) */
+  anchor?: ChainHead | null;
+};
+
+function isOptions(x: unknown): x is VerifyOptions {
+  return typeof x === "object" && x !== null && ("anchor" in x || "head" in x) && !("hash" in x);
+}
+
 /**
  * Verify one org's chain. `rows` must be that org's rows in ascending seq order as read from the DB.
  * Returns the first seq at which the chain breaks: a modified row (its seq), a deleted row (the missing
- * seq), a reordered row, or a wrong key (seq 1). With `head` (chain_heads), a truncated tail is caught too.
+ * seq), a reordered row, or a wrong key (seq 1). The third argument is either the chain head (legacy form)
+ * or `{head?, anchor?}`. With an anchor, cutting the newest rows (and rewinding chain_heads) fails at
+ * anchor.seq; rows after the anchor are fine (spec §2.6 tail cut).
  */
-export function verifyChain(rows: readonly ChainRow[], key: string, head?: ChainHead | null): VerifyResult {
+export function verifyChain(
+  rows: readonly ChainRow[],
+  key: string,
+  headOrOptions?: ChainHead | VerifyOptions | null,
+): VerifyResult {
   assertChainKey(key);
+  const opts: VerifyOptions = isOptions(headOrOptions) ? headOrOptions : { head: headOrOptions ?? null };
   let prevHash = GENESIS_HASH;
   for (let i = 0; i < rows.length; i++) {
     const expectedSeq = i + 1;
@@ -105,11 +123,20 @@ export function verifyChain(rows: readonly ChainRow[], key: string, head?: Chain
     if (!hexEqual(r.hash, computeHash(prevHash, r, key))) return { ok: false, firstBadSeq: expectedSeq };
     prevHash = r.hash;
   }
+  const head = opts.head;
   if (head) {
     const last = rows.length;
     if (head.seq > last) return { ok: false, firstBadSeq: last + 1 }; // tail rows deleted
     if (head.seq < last) return { ok: false, firstBadSeq: head.seq + 1 }; // rows beyond the head
     if (last > 0 && !hexEqual(head.hash, prevHash)) return { ok: false, firstBadSeq: last };
+  }
+  const anchor = opts.anchor;
+  if (anchor) {
+    if (!Number.isInteger(anchor.seq) || anchor.seq < 1) throw new Error("bad anchor");
+    const row = rows[anchor.seq - 1];
+    if (!row || row.seq !== anchor.seq || !hexEqual(row.hash, anchor.hash)) {
+      return { ok: false, firstBadSeq: anchor.seq };
+    }
   }
   return { ok: true, firstBadSeq: null };
 }

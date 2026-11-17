@@ -103,3 +103,54 @@ export function ipAllowed(ip: string | null | undefined, cidrs: readonly string[
   if (!addr) return false;
   return ranges.some(([net, bits]) => net.kind() === addr.kind() && addr.match(net, bits));
 }
+
+/** ipaddr.js range() names that are never an office's public egress (spec §2.2). */
+const NON_PUBLIC = new Set([
+  "unspecified",
+  "broadcast",
+  "multicast",
+  "linkLocal",
+  "loopback",
+  "private",
+  "carrierGradeNat",
+  "uniqueLocal",
+]);
+
+function lastAddress(net: ipaddr.IPv4 | ipaddr.IPv6, bits: number): ipaddr.IPv4 | ipaddr.IPv6 {
+  const cidr = `${net.toString()}/${bits}`;
+  return net.kind() === "ipv4" ? ipaddr.IPv4.broadcastAddressFromCIDR(cidr) : ipaddr.IPv6.broadcastAddressFromCIDR(cidr);
+}
+
+/**
+ * The admin-input CIDR rules (spec §2.2, AC-03). Returns the normalised CIDR or throws AppError:
+ *   cidr_invalid    syntax error, no prefix, or an IPv4-mapped IPv6 prefix
+ *   cidr_not_public the whole block lies in one non-public range (private, loopback, CGNAT, ULA, link-local, …)
+ *   cidr_too_broad  IPv4 shorter than /16 or IPv6 shorter than /32 (incl. /0)
+ *   cidr_not_public a network address whose range() is non-public
+ * Documentation ranges (range "reserved": 198.51.100.0/24, 2001:db8::/32) are accepted.
+ * The "whole block" test runs first so 10.0.0.0/8 reads as not public while /0 reads as too broad (AC-03).
+ */
+export function parseCidr(input: string): string {
+  if (typeof input !== "string") throw new AppError("cidr_invalid");
+  const m = /^([^/\s]+)\/(\d{1,3})$/.exec(input.trim());
+  if (!m) throw new AppError("cidr_invalid");
+  if (m[2].length > 1 && m[2].startsWith("0")) throw new AppError("cidr_invalid");
+  const bits = Number(m[2]);
+  let net: ipaddr.IPv4 | ipaddr.IPv6;
+  if (ipaddr.IPv4.isValidFourPartDecimal(m[1])) {
+    if (bits > 32) throw new AppError("cidr_invalid");
+    net = ipaddr.IPv4.networkAddressFromCIDR(`${m[1]}/${bits}`);
+  } else if (m[1].includes(":") && !m[1].includes("%") && ipaddr.IPv6.isValid(m[1])) {
+    if (bits > 128) throw new AppError("cidr_invalid");
+    if (ipaddr.IPv6.parse(m[1]).isIPv4MappedAddress()) throw new AppError("cidr_invalid");
+    net = ipaddr.IPv6.networkAddressFromCIDR(`${m[1]}/${bits}`);
+  } else {
+    throw new AppError("cidr_invalid");
+  }
+  const first = net.range();
+  const last = lastAddress(net, bits).range();
+  if (first === last && NON_PUBLIC.has(first)) throw new AppError("cidr_not_public");
+  if ((net.kind() === "ipv4" && bits < 16) || (net.kind() === "ipv6" && bits < 32)) throw new AppError("cidr_too_broad");
+  if (NON_PUBLIC.has(first)) throw new AppError("cidr_not_public");
+  return `${net.toString()}/${bits}`;
+}

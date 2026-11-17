@@ -21,8 +21,8 @@ describe("AC-28 append-only", () => {
     expect(() => h.sqlite.prepare("UPDATE attendance_events SET kind = 'OUT' WHERE seq = 1").run()).toThrow(
       /append-only/,
     );
-    // even "harmless" columns outside the hash cannot be rewritten
-    expect(() => h.sqlite.prepare("UPDATE attendance_events SET ip = NULL").run()).toThrow(/append-only/);
+    // columns outside the hash cannot be rewritten either (revised AC-28: they may only be nulled)
+    expect(() => h.sqlite.prepare("UPDATE attendance_events SET ip = '203.0.113.9'").run()).toThrow(/append-only/);
     expect(() => h.db.update(attendanceEvents).set({ effectiveAt: 1 }).where(eq(attendanceEvents.seq, 1)).run()).toThrow(
       /append-only/,
     );
@@ -62,8 +62,10 @@ describe("AC-28 append-only", () => {
       .all()
       .map((r) => (r as { name: string }).name);
     expect(triggers).toEqual([
+      "attendance_events_ip_ua_null_only",
       "attendance_events_no_delete",
       "attendance_events_no_update",
+      "audit_log_ip_null_only",
       "audit_log_no_delete",
       "audit_log_no_update",
     ]);

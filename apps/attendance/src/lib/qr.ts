@@ -78,46 +78,91 @@ export function mintStatic(site: QrSite, staticQrId: string, expUnix: number, se
   return `s.${site.id}.${kv}.${staticQrId}.${expUnix}.${sig}`;
 }
 
-/**
- * Verify a token against the site it was scanned for (`site` comes from the DB row of the URL's siteId).
- * Check order: parse -> site -> key version -> signature -> time. A forged or tampered token is
- * qr_invalid even when it would also be expired.
- */
-export function verifyQrToken(token: unknown, site: QrSite, secret: string, nowMs: number): RotatingOk | StaticOk | QrFail {
-  const invalid: QrFail = { ok: false, error: "qr_invalid" };
-  if (typeof token !== "string" || token.length > 256) return invalid;
+type Parsed =
+  | { kind: "rotating"; siteId: string; window: number }
+  | { kind: "static"; siteId: string; staticQrId: string; expUnix: number };
+
+/** Parse + signature check against `site` (token siteId and key version must match it). null -> qr_invalid. */
+function parseSigned(token: unknown, site: QrSite, secret: string): Parsed | null {
+  if (typeof token !== "string" || token.length > 256) return null;
   checkSite(site);
   const parts = token.split(".");
   const kind = parts[0];
 
   if (kind === "r" && parts.length === 5) {
     const [, siteId, kvS, wS, sig] = parts;
-    if (!ID_RE.test(siteId) || !INT_RE.test(kvS) || !INT_RE.test(wS) || !SIG_RE.test(sig)) return invalid;
-    if (siteId !== site.id || Number(kvS) !== site.qrKeyVersion) return invalid;
+    if (!ID_RE.test(siteId) || !INT_RE.test(kvS) || !INT_RE.test(wS) || !SIG_RE.test(sig)) return null;
+    if (siteId !== site.id || Number(kvS) !== site.qrKeyVersion) return null;
     const w = Number(wS);
     const expected = sign(siteKey(secret, site.id, site.qrKeyVersion), `r|${site.id}|${site.qrKeyVersion}|${w}`);
-    if (!sigEqual(expected, sig)) return invalid;
-    const wNow = windowAt(nowMs, site.rotationSeconds);
-    if (w > wNow) return invalid; // from the future
-    if (w < wNow - site.graceWindows) return { ok: false, error: "qr_expired" };
-    return { ok: true, kind: "rotating", window: w };
+    return sigEqual(expected, sig) ? { kind: "rotating", siteId, window: w } : null;
   }
 
   if (kind === "s" && parts.length === 6) {
     const [, siteId, kvS, qrId, expS, sig] = parts;
-    if (!ID_RE.test(siteId) || !INT_RE.test(kvS) || !ID_RE.test(qrId) || !INT_RE.test(expS) || !SIG_RE.test(sig)) {
-      return invalid;
-    }
-    if (siteId !== site.id || Number(kvS) !== site.qrKeyVersion) return invalid;
+    if (!ID_RE.test(siteId) || !INT_RE.test(kvS) || !ID_RE.test(qrId) || !INT_RE.test(expS) || !SIG_RE.test(sig)) return null;
+    if (siteId !== site.id || Number(kvS) !== site.qrKeyVersion) return null;
     const exp = Number(expS);
-    const expected = sign(
-      siteKey(secret, site.id, site.qrKeyVersion),
-      `s|${site.id}|${site.qrKeyVersion}|${qrId}|${exp}`,
-    );
-    if (!sigEqual(expected, sig)) return invalid;
-    if (!(nowMs < exp * 1000)) return { ok: false, error: "qr_expired" };
-    return { ok: true, kind: "static", staticQrId: qrId, expUnix: exp };
+    const expected = sign(siteKey(secret, site.id, site.qrKeyVersion), `s|${site.id}|${site.qrKeyVersion}|${qrId}|${exp}`);
+    return sigEqual(expected, sig) ? { kind: "static", siteId, staticQrId: qrId, expUnix: exp } : null;
+  }
+  return null;
+}
+
+/**
+ * Signature-level verify against `site` (no DB, no qr_mode): parse -> site -> key version -> signature -> time.
+ * A forged or tampered token is qr_invalid even when it would also be expired.
+ */
+export function verifyQrToken(token: unknown, site: QrSite, secret: string, nowMs: number): RotatingOk | StaticOk | QrFail {
+  const p = parseSigned(token, site, secret);
+  if (!p) return { ok: false, error: "qr_invalid" };
+  if (p.kind === "rotating") {
+    const wNow = windowAt(nowMs, site.rotationSeconds);
+    if (p.window > wNow) return { ok: false, error: "qr_invalid" }; // from the future
+    if (p.window < wNow - site.graceWindows) return { ok: false, error: "qr_expired" };
+    return { ok: true, kind: "rotating", window: p.window };
+  }
+  if (!(nowMs < p.expUnix * 1000)) return { ok: false, error: "qr_expired" };
+  return { ok: true, kind: "static", staticQrId: p.staticQrId, expUnix: p.expUnix };
+}
+
+export type ScanSite = QrSite & { qrMode: "rotating" | "static"; status: "ACTIVE" | "DISABLED" };
+export type StaticQrRow = { id: string; siteId: string; expiresAt: number; status: "ACTIVE" | "REVOKED" };
+export type ScanFail = { ok: false; error: "qr_invalid" | "qr_expired" | "qr_revoked" };
+
+/**
+ * The full scan verify block (spec §2.1), first failure wins:
+ *   site unknown -> qr_invalid · site DISABLED -> qr_revoked
+ *   parse error, prefix != site.qr_mode, token siteId != pathSiteId, kv != site.qr_key_version, bad signature -> qr_invalid
+ *   rotating: window > w_now -> qr_invalid · window < w_now - grace -> qr_expired
+ *   static:   DB row (same site, same exp) missing -> qr_invalid · REVOKED -> qr_revoked · now >= exp -> qr_expired
+ */
+export function verifyScan(args: {
+  pathSiteId: string;
+  token: unknown;
+  site: ScanSite | null | undefined;
+  findStatic: (staticQrId: string) => StaticQrRow | null | undefined;
+  secret: string;
+  nowMs: number;
+}): RotatingOk | StaticOk | ScanFail {
+  const { pathSiteId, token, site, secret, nowMs } = args;
+  if (!site || site.id !== pathSiteId) return { ok: false, error: "qr_invalid" };
+  if (site.status !== "ACTIVE") return { ok: false, error: "qr_revoked" };
+  const prefix = typeof token === "string" ? token.slice(0, 2) : "";
+  if (prefix !== (site.qrMode === "rotating" ? "r." : "s.")) return { ok: false, error: "qr_invalid" };
+  const p = parseSigned(token, site, secret);
+  if (!p || p.siteId !== pathSiteId) return { ok: false, error: "qr_invalid" };
+
+  if (p.kind === "rotating") {
+    const wNow = windowAt(nowMs, site.rotationSeconds);
+    if (p.window > wNow) return { ok: false, error: "qr_invalid" };
+    if (p.window < wNow - site.graceWindows) return { ok: false, error: "qr_expired" };
+    return { ok: true, kind: "rotating", window: p.window };
   }
 
-  return invalid;
+  const row = args.findStatic(p.staticQrId);
+  if (!row || row.siteId !== site.id || row.expiresAt !== p.expUnix * 1000) return { ok: false, error: "qr_invalid" };
+  if (row.status !== "ACTIVE") return { ok: false, error: "qr_revoked" };
+  if (!(nowMs < p.expUnix * 1000)) return { ok: false, error: "qr_expired" };
+  return { ok: true, kind: "static", staticQrId: p.staticQrId, expUnix: p.expUnix };
 }

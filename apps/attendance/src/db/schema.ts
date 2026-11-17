@@ -1,8 +1,9 @@
 /**
  * Data model, spec §4. SQLite for dev and test; Postgres-ready (no SQLite-only SQL outside migrations).
  * All times are UTC epoch milliseconds (integer). Ids are random text unless noted.
- * attendance_events and audit_log are append-only: BEFORE UPDATE/DELETE triggers live in the custom
- * migration drizzle/0001_append_only_triggers.sql (AC-28).
+ * attendance_events and audit_log are append-only: BEFORE UPDATE/DELETE triggers live in the migrations
+ * (0001, revised in 0002: only ip/ua may be set to NULL, AC-28). Adding a column to either table means
+ * adding it to the `BEFORE UPDATE OF …` list in a new migration (tests/unit/db-retention.test.ts checks it).
  */
 import { sql } from "drizzle-orm";
 import {
@@ -49,6 +50,8 @@ export const sites = sqliteTable(
     rotationSeconds: integer("rotation_seconds").notNull().default(30),
     graceWindows: integer("grace_windows").notNull().default(1),
     qrKeyVersion: integer("qr_key_version").notNull().default(1),
+    /** an IN older than this counts as OUT for the punch state (spec §2.5) */
+    maxShiftHours: integer("max_shift_hours").notNull().default(16),
     status: text("status", { enum: SITE_STATUSES }).notNull().default("ACTIVE"),
     createdAt: integer("created_at").notNull(),
   },
@@ -156,6 +159,8 @@ export const webauthnChallenges = sqliteTable(
     purpose: text("purpose", { enum: CHALLENGE_PURPOSES }).notNull(),
     challenge: text("challenge").notNull(),
     ticketId: text("ticket_id"),
+    /** punch challenges only: the kind requested at /api/punch/options (IN/OUT) */
+    kind: text("kind", { enum: ["IN", "OUT"] }),
     createdAt: integer("created_at").notNull(),
     expiresAt: integer("expires_at").notNull(),
     usedAt: integer("used_at"),

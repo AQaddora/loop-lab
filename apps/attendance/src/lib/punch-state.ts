@@ -9,7 +9,17 @@ export type StateEvent = {
   kind: "IN" | "OUT" | "VOID";
   effectiveAt: number;
   correctsSeq: number | null;
+  /** the row's site; its max_shift_hours decides when an open IN goes stale */
+  siteId?: string | null;
 };
+
+export const DEFAULT_MAX_SHIFT_HOURS = 16;
+
+/**
+ * Stale-IN rule (spec §2.5): an IN older than its site's max_shift_hours counts as OUT for the state,
+ * so a forgotten check-out never blocks the next day's check-in. The IN stays open in reports (OD-9).
+ */
+export type StaleRule = { nowMs: number; maxShiftHours: (siteId: string | null) => number };
 
 export type PunchKind = "IN" | "OUT";
 export type TransitionError = "already_in" | "not_in" | "too_soon";
@@ -35,14 +45,22 @@ function latest<T extends StateEvent>(events: readonly T[]): T | null {
   return best;
 }
 
-export function currentState(events: readonly StateEvent[]): PunchKind {
+function isStaleIn(e: StateEvent, stale: StaleRule | undefined): boolean {
+  if (!stale || e.kind !== "IN") return false;
+  const h = stale.maxShiftHours(e.siteId ?? null);
+  const hours = Number.isFinite(h) && h > 0 ? h : DEFAULT_MAX_SHIFT_HOURS;
+  return stale.nowMs - e.effectiveAt > hours * 3_600_000;
+}
+
+export function currentState(events: readonly StateEvent[], stale?: StaleRule): PunchKind {
   const l = latest(events);
-  return l ? (l.kind as PunchKind) : "OUT";
+  if (!l || isStaleIn(l, stale)) return "OUT";
+  return l.kind as PunchKind;
 }
 
 /** The one action /punch should offer. */
-export function nextAction(events: readonly StateEvent[]): PunchKind {
-  return currentState(events) === "IN" ? "OUT" : "IN";
+export function nextAction(events: readonly StateEvent[], stale?: StaleRule): PunchKind {
+  return currentState(events, stale) === "IN" ? "OUT" : "IN";
 }
 
 export function checkTransition(
@@ -50,8 +68,9 @@ export function checkTransition(
   requested: PunchKind,
   nowMs: number,
   minGapMs: number = MIN_PUNCH_GAP_MS,
+  maxShiftHours?: (siteId: string | null) => number,
 ): { ok: true } | { ok: false; error: TransitionError } {
-  const state = currentState(events);
+  const state = currentState(events, maxShiftHours ? { nowMs, maxShiftHours } : undefined);
   if (requested === "IN" && state === "IN") return { ok: false, error: "already_in" };
   if (requested === "OUT" && state === "OUT") return { ok: false, error: "not_in" };
   const live = liveEvents(events);
