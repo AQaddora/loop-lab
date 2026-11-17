@@ -35,7 +35,7 @@ The spec was revised on 2026-11-17 by an adversarial review after T01–T05 had 
   ip.ts parseCidr(): `cidr_too_broad` (/0, v4 < /16, v6 < /32), `cidr_not_public` (range list in §2.2; documentation ranges accepted). qr.ts: token prefix must match site.qrMode (§2.1 verify block).
   chain.ts: `verifyChain(rows, key, {anchor})` = past checkpoint: fails at anchor.seq if that row is missing or its hash differs; later rows are fine (§2.6 tail cut). punch-state.ts: an IN older than its site's max_shift_hours counts as OUT.
   Migration 0002: sites.max_shift_hours (16), webauthn_challenges.kind, update triggers that allow only ip/ua → NULL (§2.6). New tests titled with their AC id; existing tests untouched. AC-03..07, AC-28.
-- [ ] T07 · Admin foundation: Origin check, audit, bootstrap setup, org, members — deps: T06, T17 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-33 AC-42 AC-43 && npm --prefix apps/attendance run e2e`
+- [x] T07 · Admin foundation: Origin check, audit, bootstrap setup, org, members — deps: T06, T17 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-33 AC-42 AC-43 && npm --prefix apps/attendance run e2e`
   src/lib/origin.ts (Origin required, missing = bad_origin, JSON only, /api/test/* exempt; §2.7), src/lib/audit.ts, admin authz helper, admin-write rate limit. e2e helpers send Origin on every write.
   Sign-in policy step 0 + /admin/setup + /api/admin/setup (only while no org exists), PATCH /api/admin/org (owner); add `{fixture:'empty'}` to /api/test/reset if T06 did not.
   /admin/members + /api/admin/members[/id]: one or an array; code/status/email edits; owner-only role grants; no self role/status change; last-owner guard; google_sub never writable (§1.1.3). AC-33, AC-42, AC-43.

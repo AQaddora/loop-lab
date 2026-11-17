@@ -21,13 +21,20 @@ export async function sessionInfo(): Promise<SessionInfo | null> {
   };
 }
 
-/** The signed-in member as stored now, or null (no session, unknown member, or email changed). */
+/**
+ * The signed-in member as stored now, or null (no session, unknown member, email changed, sub differs).
+ * A bootstrap session (memberId null) resolves once /admin/setup has created its owner row with the pinned sub.
+ */
 export async function currentMember(): Promise<Member | null> {
   const s = await sessionInfo();
-  if (!s?.memberId) return null;
-  const m = getDb().select().from(members).where(eq(members.id, s.memberId)).get();
+  if (!s?.sub) return null;
+  const db = getDb();
+  const email = s.email.toLowerCase();
+  const m = s.memberId
+    ? db.select().from(members).where(eq(members.id, s.memberId)).get()
+    : db.select().from(members).where(eq(members.email, email)).get();
   // email reassigned or Google account swapped since the JWT was issued -> no longer this member
-  if (!m || m.email !== s.email.toLowerCase() || m.googleSub === null || m.googleSub !== s.sub) return null;
+  if (!m || m.email !== email || m.googleSub === null || m.googleSub !== s.sub) return null;
   return m;
 }
 
@@ -43,5 +50,18 @@ export async function requireMember(opts: RequireOpts = {}): Promise<Member> {
   if (m.status === "SUSPENDED" || m.status === "REMOVED") throw new AppError("suspended");
   if (m.status === "INVITED" && !opts.allowInvited) throw new AppError("profile_incomplete");
   if (opts.requireProfile && m.profileCompletedAt === null) throw new AppError("profile_incomplete");
+  return m;
+}
+
+/**
+ * Admin routes (spec §2.3): role admin or owner and status ACTIVE; no completed profile needed.
+ * unauthenticated -> no session; suspended -> SUSPENDED/REMOVED; forbidden -> employee or INVITED.
+ */
+export async function requireAdmin(opts: { owner?: boolean } = {}): Promise<Member> {
+  const m = await currentMember();
+  if (!m) throw new AppError("unauthenticated");
+  if (m.status === "SUSPENDED" || m.status === "REMOVED") throw new AppError("suspended");
+  if (m.status !== "ACTIVE") throw new AppError("forbidden");
+  if (opts.owner ? m.role !== "owner" : m.role !== "admin" && m.role !== "owner") throw new AppError("forbidden");
   return m;
 }

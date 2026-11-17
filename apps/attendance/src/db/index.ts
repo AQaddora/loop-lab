@@ -45,3 +45,8 @@ export function getDb(): DB {
 }
 
 export { schema };
+
+/** Run fn in one synchronous SQLite transaction on the shared connection (drizzle calls inside join it). */
+export function inTx<T>(fn: () => T): T {
+  return getHandle().sqlite.transaction(fn)();
+}
