@@ -4,14 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:test": "dotenv -e .env.e2e -- sh -c \"NEXT_DIST_DIR=.next-e2e next dev -p ${E2E_PORT:-3100}\"",
+    "dev:test": "dotenv -e .env.e2e -- sh -c \"npm run db:migrate && NEXT_DIST_DIR=.next-e2e next dev -p ${E2E_PORT:-3100}\"",
     "build": "next build",
     "start": "node scripts/assert-prod-env.mjs && next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "e2e": "playwright test",
-    "check": "npm run lint && npm run typecheck && npm run test"
+    "check": "npm run lint && npm run typecheck && npm run test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
     "@simplewebauthn/browser": "14.0.0",

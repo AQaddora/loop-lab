@@ -12,7 +12,7 @@ A done-when must FAIL before the work and PASS after. Never skip or weaken an AC
 - [x] T02 · Test-mode gate, injectable server clock, prod boot guard — deps: T01 — done when: `npm --prefix apps/attendance test -- tests/unit/test-mode.test.ts`
   src/lib/test-mode.ts `isTestMode()` (§7.2), src/lib/clock.ts `now()` with test offset on globalThis, src/instrumentation.ts + scripts/assert-prod-env.mjs (§6.4); `start` = guard && next start.
   AC-08.
-- [ ] T03 · Drizzle schema + migrations (SQLite) + append-only triggers — deps: T01 — done when: `npm --prefix apps/attendance run typecheck && npm --prefix apps/attendance test -- tests/unit/db-append-only.test.ts`
+- [x] T03 · Drizzle schema + migrations (SQLite) + append-only triggers — deps: T01 — done when: `npm --prefix apps/attendance run typecheck && npm --prefix apps/attendance test -- tests/unit/db-append-only.test.ts`
   All tables, columns, statuses and partial unique indexes from §4 in src/db/schema.ts; custom migration adds BEFORE UPDATE/DELETE triggers on attendance_events + audit_log.
   tests/helpers/db.ts = fresh in-memory DB with migrations; add db:generate/db:migrate and wire migrate into dev:test. AC-28.
 - [ ] T04 · Client IP + CIDR allowlist + QR token primitives — deps: T02 — done when: `npm --prefix apps/attendance test -- tests/unit/ip.test.ts tests/unit/qr.test.ts`
