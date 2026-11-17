@@ -7,6 +7,10 @@
 # commit (git archive, never the working tree) -> docker build -> docker save | $DEPLOY_SSH docker load
 # -> write loop/deploy/inflight.json -> $DEPLOY_SSH dokku git:from-image -> wait until <PUBLIC_URL>/api/health is 200
 # with "ok": true and version == <sha12> (90 s) -> apps/attendance/scripts/smoke-remote.sh <PUBLIC_URL>, from the export.
+#   Dokku's no-op (D-025): git:from-image exits 1 with "No changes detected" when the app already points at that
+#   image. That counts as deployed only if every running web container of the app has exactly the requested
+#   image's layers (checked on the Dokku host); the health and smoke checks then run as usual. Any other non-zero
+#   exit, or a no-op while something else is running, is red. The rollback follows the same rule.
 #   green: write loop/deploy/state.json, remove the in-flight marker, git tag deploy/<UTC ts>,
 #          ledger deployed "<url> <sha12>", one fleet deployments line.
 #   red:   write loop/.deploy-paused first, then redeploy the previous image from state.json, open a decision in
@@ -153,8 +157,8 @@ PREV_SHA12=${PREV_SHA:0:12}
 
 # ---- run state ---------------------------------------------------------------
 SHA="" SHA12="" IMAGE="" STAGE="" CHILD="" WORK=""
-IN_RED=0 INTERRUPTED=0 UNPUSHED=0 VERSION_UNCHECKED=0 ROLLBACK_OK=0
-HEALTH_NOTE="" HEALTH_LOOSE_HIT=0
+IN_RED=0 INTERRUPTED=0 UNPUSHED=0 VERSION_UNCHECKED=0 ROLLBACK_OK=0 ALREADY_LIVE=0
+HEALTH_NOTE="" HEALTH_LOOSE_HIT=0 FI_RC=0 FI_NOOP=0 FI_NOTE=""
 STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 log_event() { # <event> <detail> [task, default <sha12>]
@@ -169,7 +173,60 @@ notes() { # " (version not checked; ...)" for ledger details, or nothing
   local n=""
   [ "$VERSION_UNCHECKED" -eq 0 ] || n="version not checked"
   [ "$UNPUSHED" -eq 0 ] || n="${n:+$n; }not on origin/main, shipped with --allow-unpushed"
+  [ "$ALREADY_LIVE" -eq 0 ] || n="${n:+$n; }already live: Dokku said No changes detected and the running container has this image's layers"
   [ -z "$n" ] || printf ' (%s)' "$n"
+}
+
+# Does every running web container of $DOKKU_APP have exactly the layers of <image>? Runs on the Dokku host
+# through $DEPLOY_SSH (the script comes on stdin; the two arguments are validated names). Sets FI_NOTE.
+# Only layer digests and container ids are compared and printed, never a container's env (it holds the app's secrets).
+# A Dokku that adds a filesystem layer on top of the image would make this fail, which keeps the deploy red (safe).
+probe_live() { # <image>
+  local out rc
+  out=$(timeout -k 10 60 "${SSH[@]}" bash -s -- "$DOKKU_APP" "$1" 2>&1 <<'PROBE'
+set -u
+app=$1 want=$2
+want_layers=$(docker image inspect --format '{{json .RootFS.Layers}}' "$want" 2>/dev/null) ||
+  { echo "probe: $want is not on the Dokku host"; exit 3; }
+ids=$(docker ps -q --filter "label=com.dokku.app-name=$app" --filter "label=com.dokku.process-type=web" 2>/dev/null)
+[ -n "$ids" ] || { echo "probe: no running web container for $app"; exit 4; }
+n=0
+for c in $ids; do
+  img=$(docker inspect --format '{{.Image}}' "$c" 2>/dev/null) || { echo "probe: cannot inspect container $c"; exit 5; }
+  layers=$(docker image inspect --format '{{json .RootFS.Layers}}' "$img" 2>/dev/null) ||
+    { echo "probe: cannot inspect the image of container $c"; exit 5; }
+  [ "$layers" = "$want_layers" ] || { echo "probe: container $c runs other layers than $want"; exit 6; }
+  n=$((n + 1))
+done
+echo "probe: $n running web container(s) of $app have exactly the layers of $want"
+PROBE
+)
+  rc=$?
+  FI_NOTE=$(printf '%s\n' "$out" | grep '^probe: ' | tail -n 1 | tr -cd '[:print:]' | cut -c 1-200)
+  [ -n "$FI_NOTE" ] || FI_NOTE="probe: no answer from the Dokku host (exit $rc)"
+  [ "$rc" -eq 0 ]
+}
+
+# dokku git:from-image <image>, with Dokku's no-op answered by what is actually running (D-025).
+# Sets FI_RC (0 = <image> is live) and FI_NOOP (1 = Dokku did nothing because <image> was already live).
+from_image() { # <image> <child|direct> <output file>
+  local image=$1 mode=$2 out=$3
+  FI_NOOP=0 FI_NOTE=""
+  if [ "$mode" = child ]; then
+    run_child "$WORK" "$DEPLOY_TIMEOUT" "${SSH[@]}" dokku git:from-image "$DOKKU_APP" "$image" >"$out" 2>&1
+  else
+    timeout -k 10 "$DEPLOY_TIMEOUT" "${SSH[@]}" dokku git:from-image "$DOKKU_APP" "$image" </dev/null >"$out" 2>&1
+  fi
+  FI_RC=$?
+  cat "$out" 2>/dev/null
+  if [ "$FI_RC" -eq 1 ] && grep -q 'No changes detected' "$out" 2>/dev/null; then
+    if probe_live "$image"; then
+      FI_RC=0 FI_NOOP=1
+      say "Dokku: No changes detected; $FI_NOTE, so it counts as deployed (the checks still run)"
+    else
+      say "Dokku: No changes detected, but $FI_NOTE"
+    fi
+  fi
 }
 
 next_decision_id() {
@@ -285,12 +342,14 @@ red() { # <stage> <what failed>
   log_event test_fail "$PUBLIC_URL $SHA12 $stage red: $2$(notes)"
   if [ -n "$PREV_IMAGE" ] && [ "$PREV_IMAGE" != "$IMAGE" ]; then
     say "rolling back to $PREV_IMAGE"
-    timeout -k 10 "$DEPLOY_TIMEOUT" "${SSH[@]}" dokku git:from-image "$DOKKU_APP" "$PREV_IMAGE" </dev/null
-    rc=$?
+    from_image "$PREV_IMAGE" direct "$WORK/rollback.out"
+    rc=$FI_RC
+    local already=""
+    [ "$FI_NOOP" -eq 0 ] || already="already live: Dokku said No changes detected and the running container has its layers; "
     if [ "$rc" -ne 0 ]; then
-      rollback="rollback to $PREV_IMAGE FAILED (dokku git:from-image exit $rc)"
+      rollback="rollback to $PREV_IMAGE FAILED (dokku git:from-image exit $rc${FI_NOTE:+; $FI_NOTE})"
     elif wait_health "$PREV_SHA12" "$PREV_SHA"; then
-      rollback="rolled back to $PREV_IMAGE (health: $HEALTH_NOTE)"
+      rollback="rolled back to $PREV_IMAGE (${already}health: $HEALTH_NOTE)"
       ROLLBACK_OK=1
     else
       rollback="rolled back to $PREV_IMAGE, but its health is not green after ${HEALTH_TIMEOUT} s ($HEALTH_NOTE)"
@@ -411,6 +470,7 @@ if [ "$DRY" -eq 1 ]; then
   say "  2 build  docker build --build-arg GIT_SHA=$SHA -t $IMAGE -f <export>/$DOCKERFILE_REL <export>/$CONTEXT_REL"
   say "  3 ship   docker save $IMAGE | \$DEPLOY_SSH docker load"
   say "  4 deploy write $(tilde "$INFLIGHT"), then \$DEPLOY_SSH dokku git:from-image $DOKKU_APP $IMAGE (up to ${DEPLOY_TIMEOUT} s)"
+  say "           exit 1 + \"No changes detected\" counts as deployed only if every running web container has exactly $IMAGE's layers"
   if [ "$LOOSE_VERSION" -eq 1 ]; then
     say "  5 health GET $PUBLIC_URL/api/health -> 200, ok true, version == $SHA12, up to ${HEALTH_TIMEOUT} s; no version field is accepted (--allow-no-version) and logged as not checked"
   else
@@ -465,9 +525,10 @@ fi
 STAGE=deploy
 trap_signals
 say "dokku git:from-image $DOKKU_APP $IMAGE"
-run_child "$WORK" "$DEPLOY_TIMEOUT" "${SSH[@]}" dokku git:from-image "$DOKKU_APP" "$IMAGE"
-rc=$?
-[ "$rc" -eq 0 ] || red deploy "dokku git:from-image exit $rc"
+from_image "$IMAGE" child "$WORK/from-image.out"
+rc=$FI_RC
+[ "$rc" -eq 0 ] || red deploy "dokku git:from-image exit $rc${FI_NOTE:+ (No changes detected, but $FI_NOTE)}"
+ALREADY_LIVE=$FI_NOOP
 set_stage health
 say "waiting up to ${HEALTH_TIMEOUT} s for $PUBLIC_URL/api/health"
 wait_health "$SHA12" "$SHA" || red health "$HEALTH_NOTE after ${HEALTH_TIMEOUT} s"

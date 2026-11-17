@@ -9,6 +9,10 @@
 # Stub controls, as files in $STUB: build-exit, smoke-exit, smoke-hang (the smoke blocks until it is killed),
 # from-image-exit-<sha12> (git:from-image of that image fails), from-image-hang-<sha12> (it blocks until killed),
 # health-mode-<sha12> (what /api/health answers while that image is live: ok | 500 | wrong | noversion | notok).
+# Dokku's no-op (D-025): with dokku-noop, git:from-image of the image that is already live prints "No changes
+# detected" and exits 1, like Dokku. The live check then runs on the "host" (fake-ssh runs its stdin script
+# locally, against the docker stub): layers-<sha12> overrides the layers of the loaded tag, no-containers hides the
+# running web container, second-live (an image name) adds a second web container running that image.
 # Each check prints PASS or FAIL; the script exits 1 if any check fails.
 set -uo pipefail
 
@@ -47,6 +51,20 @@ case "$1" in
     cat "$ctx/marker.txt" >"$STUB/build-marker" 2>/dev/null
     exit "$(cat "$STUB/build-exit" 2>/dev/null || echo 0)" ;;
   save) printf 'stub-image-tar %s\n' "$2" ;;
+  # the Dokku host side of ship.sh's live check (probe_live): running web containers, their images, layers
+  ps) [ -e "$STUB/no-containers" ] && exit 0
+      echo c0ffee000001; [ ! -e "$STUB/second-live" ] || echo c0ffee000002 ;;
+  inspect)
+    case "${!#}" in c0ffee000002) t=$(cat "$STUB/second-live") ;; *) t=$(cat "$STUB/live" 2>/dev/null) ;; esac
+    printf 'sha256:running-%s\n' "${t##*:}" ;;
+  image)
+    ref=${!#}
+    case "$ref" in
+      sha256:running-*) t=${ref#sha256:running-} f="$STUB/running-layers-$t" ;;
+      *:*) t=${ref##*:} f="$STUB/layers-$t" ;;
+      *) exit 1 ;;
+    esac
+    if [ -f "$f" ]; then cat "$f"; else printf '["sha256:layer-%s"]\n' "$t"; fi ;;
   *) echo "stub docker: unexpected: $*" >&2; exit 1 ;;
 esac
 EOF
@@ -57,11 +75,16 @@ printf '%s\n' "$1" >>"$STUB/ssh-hosts.log"; shift
 printf '%s\n' "$*" >>"$STUB/ssh.log"
 case "$1 $2" in
   "docker load") cat >"$STUB/loaded"; echo "Loaded image" ;;
+  "bash -s") exec "$@" ;;   # a script on stdin, run "on the host" (against the docker stub)
   "dokku git:from-image")
     if [ -e "$SHIP_TEST_PAUSE" ]; then p=paused; else p=not-paused; fi
     printf '%s %s\n' "$4" "$p" >>"$STUB/from-image.log"
     if [ -e "$STUB/from-image-hang-${4##*:}" ]; then
       printf '%s\n' "$$" >"$STUB/from-image-pid"; : >"$STUB/from-image-started"; exec sleep 60
+    fi
+    if [ -e "$STUB/dokku-noop" ] && [ "$4" = "$(cat "$STUB/live" 2>/dev/null)" ]; then
+      echo "-----> Cleaning up..." ; echo " !     No changes detected, skipping git commit" >&2
+      echo " !     Call 'ps:rebuild' on app to force a rebuild" >&2; exit 1
     fi
     rc=$(cat "$STUB/from-image-exit-${4##*:}" 2>/dev/null || echo 0)
     [ "$rc" -ne 0 ] || printf '%s\n' "$4" >"$STUB/live"
@@ -320,6 +343,7 @@ check "no health wait for B and no smoke" lacks "$T/out" "waiting up to"
 check "ledger: test_fail, blocked, decision_needed" is "$(events_since "$n")" "test_fail blocked decision_needed "
 check "the pause file names the new decision" contains "$PAUSE" "decision: $(last_did)"
 check "state.json still names A" is "$(jq -r .sha "$STATE")" "$A"
+check "a plain exit 1 (no 'No changes detected') never runs the live check" lacks "$STUB/ssh.log" "bash -s"
 rm -f "$PAUSE"
 
 # ---- 9. health red: wrong version, non-200, ok not true ------------------------
@@ -516,6 +540,87 @@ check "unpushed + --allow-unpushed: the deployed detail records it" \
 g push -q origin main
 ship "$C" --dry-run
 check "once pushed, the dry run plans it (exit 0)" is "$RC" 0
+
+# ---- 18. Dokku's no-op: "No changes detected" (D-025, specs/prod-loop.md 4.4) ----------
+# The bug that paused production on 2026-11-17: a bootstrap deploy had made the image live by hand, so the loop's
+# first git:from-image of that same image got Dokku's no-op (exit 1) and the release was called red.
+echo "== D-025: the requested image is already live (bootstrap deploy, no state.json yet)"
+rm -f "$STATE"
+: >"$STUB/dokku-noop"
+n=$(lines "$STUB/ledger.jsonl") fi_before=$(lines "$STUB/from-image.log") smoke_before=$(lines "$STUB/smoke.log")
+tags_before=$(g tag -l 'deploy/*' | wc -l | tr -d ' ')
+sleep 1   # deploy tags have one-second resolution, and section 17 tagged a deploy of C a moment ago
+ship "$C"
+check "no-op on the live image: exits 0 (was the D-025 false red)" is "$RC" 0
+check "no-op: Dokku really answered No changes detected" contains "$T/out" "No changes detected, skipping git commit"
+check "no-op: one git:from-image and no rollback" is "$(from_image_since "$fi_before")" "loop-lab-attendance:$C12 not-paused;"
+check "no-op: the live check ran on the Dokku host with the app and the image" \
+  contains "$STUB/ssh.log" "bash -s -- attendance loop-lab-attendance:$C12"
+check "no-op: it says why it counts as deployed" \
+  contains "$T/out" "probe: 1 running web container(s) of attendance have exactly the layers of loop-lab-attendance:$C12, so it counts as deployed"
+check "no-op: health still ran and saw the version" contains "$T/out" "health: 200, ok, version $C12"
+check "no-op: smoke still ran" is "$(lines "$STUB/smoke.log")" "$((smoke_before + 1))"
+check "no-op: state.json now names C" is "$(jq -r '"\(.sha) \(.image)"' "$STATE" 2>/dev/null)" "$C loop-lab-attendance:$C12"
+check "no-op: ledger has only deployed" is "$(events_since "$n")" "deployed "
+check "no-op: the deployed detail says it was already live" \
+  is "$(last_detail deployed)" "$URL $C12 (already live: Dokku said No changes detected and the running container has this image's layers)"
+check "no-op: a deploy tag was written" is "$(g tag -l 'deploy/*' | wc -l | tr -d ' ')" "$((tags_before + 1))"
+check "no-op: no pause, no marker" test ! -e "$PAUSE" -a ! -e "$INFLIGHT"
+check "no-op: the live check never prints a container env" lacks "$T/out" "Config.Env"
+
+echo "== D-025: no-op, but the running container has other layers than the requested tag"
+printf '["sha256:rebuilt-%s"]\n' "$C12" >"$STUB/layers-$C12"   # the tag on the host names other content than what runs
+n=$(lines "$STUB/ledger.jsonl")
+ship "$C"
+rm -f "$STUB/layers-$C12"
+check "other layers: exits 1" is "$RC" 1
+check "other layers: the pause reason names the no-op and what the check found" contains "$PAUSE" \
+  "reason: deploy red on $C12: dokku git:from-image exit 1 (No changes detected, but probe: container c0ffee000001 runs other layers than loop-lab-attendance:$C12)"
+check "other layers: no health wait and no smoke" lacks "$T/out" "waiting up to"
+check "other layers: ledger test_fail, blocked, decision_needed" is "$(events_since "$n")" "test_fail blocked decision_needed "
+rm -f "$PAUSE"
+
+echo "== D-025: no-op, but no web container is running"
+: >"$STUB/no-containers"
+ship "$C"
+rm -f "$STUB/no-containers"
+check "no container: exits 1" is "$RC" 1
+check "no container: the pause reason says so" contains "$PAUSE" "probe: no running web container for attendance"
+rm -f "$PAUSE"
+
+echo "== D-025: no-op, but one of two web containers runs another image"
+echo "loop-lab-attendance:$B12" >"$STUB/second-live"
+ship "$C"
+rm -f "$STUB/second-live"
+check "mixed containers: exits 1" is "$RC" 1
+check "mixed containers: the pause reason names the other container" contains "$PAUSE" "probe: container c0ffee000002 runs other layers"
+rm -f "$PAUSE"
+
+echo "== D-025: no-op and the live check passes, but health is red"
+echo wrong >"$STUB/health-mode-$C12"
+ship "$C"
+rm -f "$STUB/health-mode-$C12"
+check "no-op + red health: exits 1 (the checks still decide)" is "$RC" 1
+check "no-op + red health: health red" contains "$PAUSE" "reason: health red on $C12: 200 but version 0123456789ab"
+rm -f "$PAUSE"
+
+echo "== D-025: the rollback meets the no-op (the new image never went live)"
+printf 'committed D\n' >"$REPO/apps/attendance/marker.txt"
+g commit -qam "commit D"; g push -q origin main
+D=$(g rev-parse HEAD) D12=${D:0:12}
+echo "loop-lab-attendance:$C12" >"$STUB/live"
+echo 1 >"$STUB/from-image-exit-$D12"
+fi_before=$(lines "$STUB/from-image.log")
+ship "$D"
+rm -f "$STUB/from-image-exit-$D12"
+check "no-op rollback: exits 1 (the deploy of D was red)" is "$RC" 1
+check "no-op rollback: D, then C (which Dokku already ran)" is "$(from_image_since "$fi_before")" "loop-lab-attendance:$D12 not-paused;loop-lab-attendance:$C12 paused;"
+check "no-op rollback: counted as rolled back, with C's health" contains "$PAUSE" \
+  "rollback: rolled back to loop-lab-attendance:$C12 (already live: Dokku said No changes detected and the running container has its layers; health: 200, ok, version $C12)"
+# shellcheck disable=SC2016  # the snippet takes its values as $1/$2, on purpose
+check "no-op rollback: the decision does not ask to check production by hand" \
+  bash -c '! sed -n "/^## $1 /,\$p" "$2" | grep -qF "First check by hand"' _ "$(last_did)" "$T/decisions.md"
+rm -f "$PAUSE" "$STUB/dokku-noop"
 
 echo
 echo "ship.test.sh: $npass PASS, $nfail FAIL"
