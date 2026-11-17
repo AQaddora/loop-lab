@@ -9,7 +9,7 @@ A done-when must FAIL before the work and PASS after. Never skip or weaken an AC
   Non-interactive create-next-app in apps/attendance (TS strict, App Router, src/, ESLint, npm); scripts per §6.3 (no db:migrate yet); `.env.example` + `.env.e2e` per §6.4.
   `GET /api/health` → `{"ok":true}`; tests/unit/sanity.test.ts; Playwright Chromium-only per §6.3, webServer `npm run dev:test` on :3100; `npx playwright install chromium`.
   AC-01.
-- [ ] T02 · Test-mode gate, injectable server clock, prod boot guard — deps: T01 — done when: `npm --prefix apps/attendance test -- tests/unit/test-mode.test.ts`
+- [x] T02 · Test-mode gate, injectable server clock, prod boot guard — deps: T01 — done when: `npm --prefix apps/attendance test -- tests/unit/test-mode.test.ts`
   src/lib/test-mode.ts `isTestMode()` (§7.2), src/lib/clock.ts `now()` with test offset on globalThis, src/instrumentation.ts + scripts/assert-prod-env.mjs (§6.4); `start` = guard && next start.
   AC-08.
 - [ ] T03 · Drizzle schema + migrations (SQLite) + append-only triggers — deps: T01 — done when: `npm --prefix apps/attendance run typecheck && npm --prefix apps/attendance test -- tests/unit/db-append-only.test.ts`
