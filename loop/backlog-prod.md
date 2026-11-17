@@ -15,7 +15,8 @@ Started by the loop holder's steering decision D-023 (2026-11-17). T16 in `loop/
 - [x] P04 · CI oracle for trainee PRs + secret scan — deps: T16 — done when: `bash loop/checks/secret-scan.sh && gh run list -R AQaddora/loop-lab -w oracle -L 1 --json conclusion -q '.[0].conclusion' | grep -qx success`
   Done 2026-11-17 by the orchestrator seat: `secret-scan.sh` PASS, GitHub `oracle` run on 2a21bbe = success.
   PR-07, PR-08. `.github/workflows/oracle.yml` (pull_request + push to main; no secrets; Playwright Chromium), `loop/checks/secret-scan.sh`.
-- [ ] P05 · Protect main — deps: P04 — done when: `gh api repos/AQaddora/loop-lab/branches/main/protection -q '.required_status_checks.contexts[]' | grep -qx oracle`
+- [x] P05 · Protect main — deps: P04 — done when: `gh api repos/AQaddora/loop-lab/branches/main/protection -q '.required_status_checks.contexts[]' | grep -qx oracle`
+  Done 2026-11-17 by the orchestrator seat when the repo went public: required check `oracle`, 1 CODEOWNER review for PRs, no force-push or deletion, enforce_admins off.
   PR-09, D-024. Required check `oracle`, a required CODEOWNER review for PRs, no force-push. The owner's loop commits are not blocked (enforce_admins off).
 - [ ] P06 · observe.sh shows the production loop — deps: P03 — done when: `bash loop/observe.sh summary | grep -q 'production'`
   PR-10. One block: the live sha, the last deploy, paused or not, and the last red observer check.

@@ -99,3 +99,4 @@
 {"ts":"2026-11-17T22:42:24Z","loop":"deploy","app":"attendance","task":"P04","event":"done","detail":"CI oracle green on GitHub (2a21bbe); secret-scan PASS","commit":"2a21bbe"}
 {"ts":"2026-11-17T22:45:03Z","loop":"inner","app":"lab","task":"-","event":"session_start","detail":"startup","commit":""}
 {"ts":"2026-11-17T22:50:54Z","loop":"feature","app":"lab","task":"-","event":"fixed","detail":"pre-publication: scanner no longer ships hashed private names (they are guessable); history rewritten while private: 72270b2->b68bd15, 2a21bbe->1405939, c145e3a->4ee1394, f13fcd0->a2090af","commit":"a2090af"}
+{"ts":"2026-11-17T22:51:41Z","loop":"deploy","app":"attendance","task":"P05","event":"done","detail":"main protected: oracle required, CODEOWNER review for PRs, no force-push (D-024); repo public at https://github.com/AQaddora/loop-lab","commit":""}
