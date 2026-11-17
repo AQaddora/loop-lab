@@ -46,7 +46,7 @@ The spec was revised on 2026-11-17 by an adversarial review after T01–T05 had 
   GET /s/[siteId]?t= → rate limit → IP → token (§2.1 verify block; unknown site qr_invalid, DISABLED qr_revoked) → scan_tickets row + HttpOnly `scan_ticket` cookie (Max-Age = TTL, Path §2.7) → 303 /punch; `<main data-error>` page.
   Static QR: POST /api/admin/sites/[id]/static-qr (TTL ≤ 30 d else ttl_too_long), printable /admin/sites/[id]/qr/[qrId], revoke. src/proxy.ts CSP nonce + headers (§2.7). /s/* + /api/client-ip rate limits (office-IP allowance).
   AC-14 freezes the clock: add `{fixedMs}` to /api/test/clock if T06 did not. AC-12, AC-13, AC-14, AC-15, AC-38.
-- [ ] T09 · Onboarding profile + passkey registration (PENDING) — deps: T08 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-16 AC-17 AC-18 AC-35 && npm --prefix apps/attendance run e2e`
+- [x] T09 · Onboarding profile + passkey registration (PENDING) — deps: T08 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-16 AC-17 AC-18 AC-35 && npm --prefix apps/attendance run e2e`
   /onboarding + POST /api/profile (§1.3.4); /enroll + /api/webauthn/register/{options,verify} exactly as §2.4: binds the ticket, IP checked at both steps, an older PENDING superseded, synced policy from orgs.
   Waiting screen shows `data-confirm-code` from /api/me/state. e2e/helpers/webauthn.ts + the registration half of e2e/helpers/ceremony.ts (UV `discouraged` override for AC-18, §7.1). AC-16, AC-17, AC-18, AC-35.
 - [ ] T10 · Admin credential approvals with confirm code (approve / reject / revoke) — deps: T09 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-20 && npm --prefix apps/attendance run e2e`

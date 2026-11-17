@@ -115,3 +115,50 @@ export async function auditFor(adminCtx: Req, targetId: string): Promise<AuditEn
   expect(r.status).toBe(200);
   return r.body.entries;
 }
+
+/** Scan a fresh rotating QR of `siteId` from `ip` inside this context (the ticket cookie lands in it). */
+export async function scan(ctx: BrowserContext, siteId: string, ip: string) {
+  const qr = await mintQr(ctx.request, siteId);
+  const res = await ctx.request.get(qr.url, { headers: { "x-test-client-ip": ip }, maxRedirects: 0 });
+  return { status: res.status(), location: res.headers()["location"] ?? null };
+}
+
+export const PROFILE = {
+  "emp1@acme.test": { fullName: "Emma One", employeeCode: "E001", phone: "+1 555 0101" },
+  "emp2@acme.test": { fullName: "Eli Two", employeeCode: "E002", phone: "+1 555 0102" },
+} as const;
+
+export async function onboard(ctx: BrowserContext, email: keyof typeof PROFILE) {
+  const r = await post(ctx, "/api/profile", PROFILE[email]);
+  expect(r.status, JSON.stringify(r.body)).toBe(200);
+}
+
+/** A context signed in as `email`, onboarded, every request from `ip`, holding a fresh ticket for `siteId`. */
+export async function employeeOnSite(browser: import("@playwright/test").Browser, email: keyof typeof PROFILE, siteId = "site_hq", ip = "198.51.100.23") {
+  const ctx = await signedIn(browser, email);
+  await ctx.setExtraHTTPHeaders({ "x-test-client-ip": ip });
+  await onboard(ctx, email);
+  expect((await scan(ctx, siteId, ip)).status).toBe(303);
+  return ctx;
+}
+
+export type QueueItem = {
+  id: string;
+  member: { id: string; email: string };
+  status: string;
+  regIp: string | null;
+  regUa: string | null;
+  regSiteId: string | null;
+  regTicketId: string | null;
+  aaguid: string | null;
+  synced: boolean;
+  backupEligible: boolean;
+  backupState: boolean;
+  decisionNote: string | null;
+};
+
+export async function queue(adminCtx: Req, status?: string) {
+  const r = await get<{ credentials: QueueItem[] }>(adminCtx, `/api/admin/credentials${status ? `?status=${status}` : ""}`);
+  expect(r.status).toBe(200);
+  return { items: r.body.credentials, raw: JSON.stringify(r.body) };
+}
