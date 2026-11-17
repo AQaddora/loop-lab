@@ -6,8 +6,9 @@ Loop name for `loop/log-event.sh`: `deploy`, app `attendance`.
 Global gate on top of each done-when: `npm --prefix apps/attendance run check` and `bash loop/checks/secret-scan.sh`.
 Started by the loop holder's steering decision D-023 (2026-11-17). T16 in `loop/backlog-attendance.md` is the first deploy, and every P-task depends on it.
 
-- [ ] P01 · Health reports the deployed version — deps: T16 — done when: `npm --prefix apps/attendance test -- tests/unit/health-version.test.ts && curl -fsS https://attendance.apps.taqat.academy/api/health | grep -q '"version"'`
+- [!] P01 · Health reports the deployed version — deps: T16 — done when: `npm --prefix apps/attendance test -- tests/unit/health-version.test.ts && curl -fsS https://attendance.apps.taqat.academy/api/health | grep -q '"version"'`
   PR-04. `GIT_SHA` build arg → env → `/api/health` `{ ok, version: sha12 }`. `smoke-remote.sh` also asserts `version` matches `--expect-version` when given.
+  Code is on main (`loop(P01)` commit): the unit test passes, gate green. The done-when's `curl` needs this commit live, which waits on D-025 (autodeploy paused). `version` appears only when the image sets a 12-40 hex `GIT_SHA`, so dev/E2E/CI keep AC-01's exact `{"ok":true}`.
 - [ ] P02 · Autodeploy: green main → apps-host, rollback on red smoke — deps: P01 — done when: `bash tests/deploy/autodeploy.test.sh && bash loop/deploy/autodeploy.sh --dry-run`
   PR-01, PR-02, PR-03. `loop/deploy/autodeploy.sh` per spec §4.1–4.2 (flock, state.json, `deploy/<ts>` tag, ledger `deployed`, fleet deployments.jsonl). Cron: `/etc/cron.d/loop-lab-autodeploy`, every 2 min.
 - [ ] P03 · Production observer — deps: P02 — done when: `bash tests/deploy/observe.test.sh && bash loop/deploy/observe-prod.sh --once`

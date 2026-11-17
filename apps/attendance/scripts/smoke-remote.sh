@@ -5,7 +5,8 @@
 #
 # One line per check: PASS | FAIL | ERROR | SKIP <check>: <reason>
 #   health          GET /api/health -> 200 with "ok":true
-#   hsts            the URL is https and the response carries Strict-Transport-Security with max-age > 0
+#   version         only with --expect-version <sha>: /api/health reports "version" == the sha's first 12 chars
+#   hsts           the URL is https and the response carries Strict-Transport-Security with max-age > 0
 #   test-routes     GET and POST /api/test/{reset,login,clock,qr,tamper,<unknown>} -> 404
 #                   (the POST body fails every test route's strict schema, so a live bypass changes nothing)
 #   providers       /api/auth/providers lists no test-login provider
@@ -32,9 +33,23 @@ T="${SMOKE_TIMEOUT:-15}"
 CT="${SMOKE_CONNECT_TIMEOUT:-5}"
 ORIGIN_PORT="${ORIGIN_PORT:-3000}"
 
-usage() { echo "usage: smoke-remote.sh <http(s)://host[:port][/base]>" >&2; exit 2; }
-[ "$#" -eq 1 ] || usage
-URL="${1%/}"
+usage() { echo "usage: smoke-remote.sh <http(s)://host[:port][/base]> [--expect-version <sha>]" >&2; exit 2; }
+# --expect-version <sha> (PR-04): also check that /api/health reports "version" == the sha's first 12 hex chars.
+EXPECT="" URL=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --expect-version) [ "$#" -ge 2 ] || usage; EXPECT=$2; shift 2 ;;
+    -*) usage ;;
+    *) [ -z "$URL" ] || usage; URL=$1; shift ;;
+  esac
+done
+[ -n "$URL" ] || usage
+if [ -n "$EXPECT" ]; then
+  EXPECT=$(printf '%s' "$EXPECT" | tr 'A-F' 'a-f')
+  printf '%s' "$EXPECT" | grep -Eqx '[0-9a-f]{12,40}' || { echo "smoke-remote: --expect-version needs a commit sha (12-40 hex chars)" >&2; exit 2; }
+  EXPECT=${EXPECT:0:12}
+fi
+URL="${URL%/}"
 case "$URL" in http://?* | https://?*) ;; *) usage ;; esac
 
 SCHEME="${URL%%://*}"
@@ -103,6 +118,16 @@ elif [ "$code" = 200 ] && grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' "$TMP/hea
   pass health "GET /api/health -> 200, ok:true"
 else
   fail health "GET /api/health -> $code $(snippet "$TMP/health.body")"
+fi
+if [ -n "$EXPECT" ]; then
+  got=$(sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([0-9a-fA-F]*)".*/\1/p' "$TMP/health.body" 2>/dev/null | head -n 1)
+  if [ "$rc" -ne 0 ]; then
+    error version "no /api/health response to read the version from"
+  elif [ "$got" = "$EXPECT" ]; then
+    pass version "/api/health reports version $EXPECT"
+  else
+    fail version "/api/health reports version '${got:-none}', expected $EXPECT"
+  fi
 fi
 
 # ---- hsts --------------------------------------------------------------------------------------------
