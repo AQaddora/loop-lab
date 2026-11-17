@@ -1,0 +1,24 @@
+# Build context for apps/attendance/Dockerfile. Nothing local, secret or generated goes into the image.
+# A pattern without **/ matches only at the root of the context, so every generated or local path is listed
+# with **/ (which also matches at the root).
+**/node_modules
+**/.next
+**/.next*
+**/.data
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite3
+# every env file, .env.e2e included (it sets AUTH_TEST_MODE=1)
+.env
+.env*
+**/.env*
+**/test-results
+**/playwright-report
+**/blob-report
+**/coverage
+**/*.tsbuildinfo
+**/npm-debug.log*
+# tests are not part of the runtime image
+tests
+e2e

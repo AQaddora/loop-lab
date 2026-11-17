@@ -36,7 +36,18 @@ type DbGlobal = typeof globalThis & { [KEY]?: Handle };
 
 export function getHandle(): Handle {
   const g = globalThis as DbGlobal;
-  if (!g[KEY]) g[KEY] = openDb(dbFile());
+  if (!g[KEY]) {
+    const h = openDb(dbFile());
+    // The server applies its own migrations when it opens the DB, at boot (src/instrumentation.ts,
+    // specs/prod-loop.md §4.2): a fresh /data volume gets the whole schema, an up-to-date DB is a no-op.
+    try {
+      runMigrations(h.db);
+    } catch (err) {
+      h.sqlite.close();
+      throw err;
+    }
+    g[KEY] = h;
+  }
   return g[KEY];
 }
 
