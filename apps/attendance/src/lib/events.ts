@@ -1,7 +1,7 @@
 /** Read side of the attendance log: /me history, admin log, chain verify. */
 import { asc, eq } from "drizzle-orm";
 import type { DB } from "@/db";
-import { attendanceEvents, chainHeads, type AttendanceEvent } from "@/db/schema";
+import { attendanceEvents, chainHeads, members, sites, type AttendanceEvent } from "@/db/schema";
 import { verifyChain, type ChainRow } from "./chain";
 import { liveEvents } from "./punch-state";
 
@@ -50,4 +50,36 @@ export function memberHistory(db: DB, memberId: string) {
     actorMemberId: r.actorMemberId,
     voided: r.kind !== "VOID" && !live.has(r.seq),
   }));
+}
+
+/** The org's log joined with member + site names, with the voided flag. */
+export function adminLog(db: DB, orgId: string) {
+  const rows = orgEvents(db, orgId);
+  const ms = new Map(db.select().from(members).where(eq(members.orgId, orgId)).all().map((m) => [m.id, m]));
+  const ss = new Map(db.select().from(sites).where(eq(sites.orgId, orgId)).all().map((s) => [s.id, s]));
+  const voided = new Set(rows.filter((r) => r.kind === "VOID" && r.correctsSeq !== null).map((r) => r.correctsSeq as number));
+  return rows.map((r) => {
+    const m = ms.get(r.memberId);
+    const s = r.siteId ? ss.get(r.siteId) : undefined;
+    return {
+      seq: r.seq,
+      kind: r.kind,
+      source: r.source,
+      memberId: r.memberId,
+      memberEmail: m?.email ?? null,
+      memberName: m?.fullName ?? null,
+      employeeCode: m?.employeeCode ?? null,
+      siteId: r.siteId,
+      siteName: s?.name ?? null,
+      siteTimezone: s?.timezone ?? "UTC",
+      effectiveAt: r.effectiveAt,
+      recordedAt: r.recordedAt,
+      correctsSeq: r.correctsSeq,
+      reason: r.reason,
+      actorMemberId: r.actorMemberId,
+      actorEmail: r.actorMemberId ? (ms.get(r.actorMemberId)?.email ?? null) : null,
+      voided: r.kind !== "VOID" && voided.has(r.seq),
+      hash: r.hash,
+    };
+  });
 }

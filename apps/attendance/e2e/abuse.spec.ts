@@ -309,4 +309,40 @@ test.describe("abuse", () => {
     expect(ip.status()).toBe(429);
   });
 
+
+  test("AC-29 tampered log row detected: after /api/test/tamper verify -> {ok:false, firstBadSeq:n}; untampered -> {ok:true}", async ({ browser, request }) => {
+    const T0 = Date.parse("2026-11-17T08:00:05.000Z");
+    await setClock(request, { fixedMs: T0 });
+    const admin = await signedIn(browser, FX.admin);
+    for (const [i, kind] of (["IN", "OUT", "IN", "OUT"] as const).entries()) {
+      const r = await post(admin, "/api/admin/attendance/corrections", { kind, memberId: "m_emp1", effectiveAt: T0 - (10 - i) * 60_000, reason: `manual row ${i + 1}` });
+      expect(r.status).toBe(201);
+    }
+    const verify = async () => (await get<{ ok: boolean; firstBadSeq: number | null }>(admin, "/api/admin/attendance/verify")).body;
+    expect(await verify()).toMatchObject({ ok: true });
+
+    // ip/ua sit outside the hash: rewriting them is not a chain break
+    expect((await post(request, "/api/test/tamper", { seq: 2, field: "ip", value: "203.0.113.9" })).status).toBe(200);
+    expect(await verify()).toMatchObject({ ok: true });
+
+    expect((await post(request, "/api/test/tamper", { seq: 3, field: "kind", value: "OUT" })).status).toBe(200);
+    expect(await verify()).toEqual({ ok: false, firstBadSeq: 3 });
+    // a later, earlier break wins
+    expect((await post(request, "/api/test/tamper", { seq: 2, field: "effective_at", value: T0 - 3_600_000 })).status).toBe(200);
+    expect(await verify()).toEqual({ ok: false, firstBadSeq: 2 });
+    await admin.close();
+  });
+
+  test("AC-29 tampered log row detected: a rewritten reason is caught too", async ({ browser, request }) => {
+    const T0 = Date.parse("2026-11-17T08:00:05.000Z");
+    await setClock(request, { fixedMs: T0 });
+    const admin = await signedIn(browser, FX.admin);
+    for (let i = 0; i < 2; i++) {
+      expect((await post(admin, "/api/admin/attendance/corrections", { kind: i === 0 ? "IN" : "OUT", memberId: "m_emp2", effectiveAt: T0 - (5 - i) * 60_000, reason: "manual" })).status).toBe(201);
+    }
+    expect((await post(request, "/api/test/tamper", { seq: 1, field: "reason", value: "something else" })).status).toBe(200);
+    expect((await get(admin, "/api/admin/attendance/verify")).body).toEqual({ ok: false, firstBadSeq: 1 });
+    await admin.close();
+  });
+
 });

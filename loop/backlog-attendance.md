@@ -64,7 +64,7 @@ The spec was revised on 2026-11-17 by an adversarial review after T01–T05 had 
 - [x] T13 · Kiosk pairing + rotating QR display — deps: T08 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-32 && npm --prefix apps/attendance run e2e`
   POST /api/admin/kiosks → 8-char one-time pairing code (10 min, hashed) → /kiosk/pair → POST /api/kiosk/pair (site IP only, 10/min per IP) → HttpOnly kiosk cookie (180 d, token hashed).
   /kiosk polls GET /api/kiosk/token (site IP only, returns serverNow) and hides the QR by server time (§1.2); `data-token` + `data-url`. The test drives page.clock + setClock, never real sleeps. AC-32.
-- [ ] T14 · Admin corrections, CSV export, chain verify — deps: T11 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-29 AC-30 && npm --prefix apps/attendance run e2e`
+- [x] T14 · Admin corrections, CSV export, chain verify — deps: T11 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-29 AC-30 && npm --prefix apps/attendance run e2e`
   POST /api/admin/attendance/corrections (VOID / IN / OUT rules in §2.6, reason 3–500 chars, no self-correction); GET export.csv with formula escaping; GET verify → `{ok, firstBadSeq}`; /admin/attendance UI.
   AC-29 uses /api/test/tamper. AC-29, AC-30.
 - [ ] T15 · Full E2E journey + whole-suite convergence — deps: T12, T13, T14, T20 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh && npm --prefix apps/attendance run check && npm --prefix apps/attendance run e2e && bash apps/attendance/scripts/check-prod-no-test-mode.sh`

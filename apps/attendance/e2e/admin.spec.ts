@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { auditFor, del, FX, get, loginAs, patch, post, reset, signedIn } from "./helpers/api";
+import { approvedEmployee, auditFor, del, FX, get, loginAs, myEvents, patch, post, reset, setClock, signedIn } from "./helpers/api";
+import { punch } from "./helpers/ceremony";
 
 const SETUP = {
   org: { name: "Acme Journey", allowSyncedPasskeys: true },
@@ -318,5 +319,138 @@ test.describe("AC-31 sites and networks", () => {
     const site = await get<{ site: Site }>(owner, `/api/admin/sites/${FX.hq}`);
     expect(site.body.site.networks.map((n) => n.cidr)).toEqual(["198.51.100.0/24", "2001:db8:10::/48"]);
     for (const c of [owner, invited, active]) await c.close();
+  });
+});
+
+test.describe("AC-30 corrections", () => {
+  test.beforeEach(async ({ request }) => {
+    await reset(request);
+  });
+
+  type Ev = { seq: number; kind: string; source: string; memberId: string; effectiveAt: number; recordedAt: number; reason: string | null; correctsSeq: number | null; voided: boolean; hash: string };
+  const log = async (ctx: Parameters<typeof get>[0]) => (await get<{ events: Ev[] }>(ctx, "/api/admin/attendance")).body.events;
+
+  test("AC-30 corrections: VOID and ADMIN IN are new rows, the original is unchanged; visible in /me and the CSV", async ({ browser, request }) => {
+    const T0 = Date.parse("2026-11-17T08:00:05.000Z");
+    await setClock(request, { fixedMs: T0 });
+    const admin = await signedIn(browser, FX.admin);
+    const { emp, page } = await approvedEmployee(browser, FX.emp1, admin);
+    await page.goto("/");
+    expect((await punch(page, "IN")).status).toBe(201);
+    const before = await log(admin);
+    expect(before).toHaveLength(1);
+
+    await setClock(request, { fixedMs: T0 + 3_600_000 });
+    const v = await post(admin, "/api/admin/attendance/corrections", { kind: "VOID", correctsSeq: 1, reason: "scanned for a colleague" });
+    expect(v.status, JSON.stringify(v.body)).toBe(201);
+    expect(v.body.event).toMatchObject({ seq: 2, kind: "VOID", correctsSeq: 1, memberId: "m_emp1" });
+    const back = T0 + 30 * 60_000;
+    const inRow = await post(admin, "/api/admin/attendance/corrections", { kind: "IN", memberId: "m_emp1", effectiveAt: back, siteId: FX.hq, reason: "forgot to scan at 08:30" });
+    expect(inRow.status, JSON.stringify(inRow.body)).toBe(201);
+    expect(inRow.body.event).toMatchObject({ seq: 3, kind: "IN", effectiveAt: back });
+
+    const after = await log(admin);
+    expect(after.map((e) => [e.seq, e.kind, e.source])).toEqual([[1, "IN", "PUNCH"], [2, "VOID", "ADMIN"], [3, "IN", "ADMIN"]]);
+    const strip = (e: Ev) => {
+      const copy: Partial<Ev> = { ...e };
+      delete copy.voided;
+      return copy;
+    };
+    expect(strip(after[0])).toEqual(strip(before[0])); // the original row never changed
+    expect(after[0].voided).toBe(true);
+    expect((await get(admin, "/api/admin/attendance/verify")).body).toEqual({ ok: true, firstBadSeq: null });
+
+    const mine = await myEvents(emp);
+    expect(mine.map((e) => [e.seq, e.kind, e.source, e.voided])).toEqual([[1, "IN", "PUNCH", true], [2, "VOID", "ADMIN", false], [3, "IN", "ADMIN", false]]);
+    expect(mine[1].reason).toBe("scanned for a colleague");
+    await page.goto("/me");
+    await expect(page.locator('tr[data-seq="1"][data-voided="1"]')).toBeVisible();
+    await expect(page.locator('tr[data-seq="3"]')).toContainText("forgot to scan at 08:30");
+
+    const csv = await admin.request.get("/api/admin/attendance/export.csv");
+    expect(csv.headers()["content-type"]).toContain("text/csv");
+    const lines = (await csv.text()).trim().split("\r\n");
+    expect(lines[0]).toMatch(/^seq,kind,source,member_email/);
+    expect(lines).toHaveLength(4);
+    expect(lines[1]).toMatch(/^1,IN,PUNCH,emp1@acme\.test,/);
+    expect(lines[2]).toContain("scanned for a colleague");
+    expect(lines[3]).toMatch(/^3,IN,ADMIN,/);
+    expect((await auditFor(admin, (inRow.body.event as { id: string }).id)).map((e) => e.action)).toEqual(["attendance.correct"]);
+    for (const c of [emp, admin]) await c.close();
+  });
+
+  test("AC-30 corrections: no reason -> reason_required; VOID of a VOID, of a voided row, of an unknown seq, or a future effective_at -> bad_request", async ({ browser, request }) => {
+    const T0 = Date.parse("2026-11-17T08:00:05.000Z");
+    await setClock(request, { fixedMs: T0 });
+    const admin = await signedIn(browser, FX.admin);
+    const base = { kind: "IN", memberId: "m_emp1", effectiveAt: T0 - 60_000 };
+    for (const reason of [undefined, "", "  ", "ab"]) {
+      const r = await post(admin, "/api/admin/attendance/corrections", reason === undefined ? base : { ...base, reason });
+      expect(r.status, String(reason)).toBe(400);
+      expect(r.body.error, String(reason)).toBe("reason_required");
+    }
+    expect((await post(admin, "/api/admin/attendance/corrections", { ...base, reason: "x".repeat(501) })).body.error).toBe("bad_request");
+    expect((await post(admin, "/api/admin/attendance/corrections", { ...base, effectiveAt: T0 + 1, reason: "in the future" })).body.error).toBe("bad_request");
+    expect((await post(admin, "/api/admin/attendance/corrections", { ...base, reason: "first entry" })).status).toBe(201); // seq 1
+    expect((await post(admin, "/api/admin/attendance/corrections", { kind: "VOID", correctsSeq: 1, reason: "typo" })).status).toBe(201); // seq 2
+    for (const [body, why] of [
+      [{ kind: "VOID", correctsSeq: 2, reason: "void the void" }, "VOID of a VOID"],
+      [{ kind: "VOID", correctsSeq: 1, reason: "void again" }, "VOID of a voided row"],
+      [{ kind: "VOID", correctsSeq: 99, reason: "no such row" }, "unknown seq"],
+      [{ kind: "VOID", reason: "no target" }, "missing correctsSeq"],
+      [{ kind: "OUT", memberId: "m_nobody", effectiveAt: T0 - 1, reason: "who?" }, "unknown member"],
+    ] as const) {
+      const r = await post(admin, "/api/admin/attendance/corrections", body);
+      expect(r.status, why).toBe(400);
+      expect(r.body.error, why).toBe("bad_request");
+    }
+    expect((await log(admin)).map((e) => e.seq)).toEqual([1, 2]);
+    await admin.close();
+  });
+
+  test("AC-30 corrections: self-correction -> forbidden_self_action", async ({ browser, request }) => {
+    const T0 = Date.parse("2026-11-17T08:00:05.000Z");
+    await setClock(request, { fixedMs: T0 });
+    const admin = await signedIn(browser, FX.admin);
+    const own = await post(admin, "/api/admin/attendance/corrections", { kind: "IN", memberId: "m_admin", effectiveAt: T0 - 60_000, reason: "I was here" });
+    expect(own.status).toBe(403);
+    expect(own.body.error).toBe("forbidden_self_action");
+    // a row about the admin, written by the owner, cannot be voided by that admin either
+    const owner = await signedIn(browser, FX.owner);
+    expect((await post(owner, "/api/admin/attendance/corrections", { kind: "IN", memberId: "m_admin", effectiveAt: T0 - 60_000, reason: "manual entry" })).status).toBe(201);
+    const voidOwn = await post(admin, "/api/admin/attendance/corrections", { kind: "VOID", correctsSeq: 1, reason: "not me" });
+    expect(voidOwn.body.error).toBe("forbidden_self_action");
+    for (const c of [admin, owner]) await c.close();
+  });
+
+  test("AC-30 corrections: a name starting with = is exported as '=", async ({ browser, request }) => {
+    const T0 = Date.parse("2026-11-17T08:00:05.000Z");
+    await setClock(request, { fixedMs: T0 });
+    const emp = await signedIn(browser, FX.emp2);
+    expect((await post(emp, "/api/profile", { fullName: '=HYPERLINK("http://evil.example","x")', employeeCode: "E002", phone: "+1 555 0102" })).status).toBe(200);
+    const admin = await signedIn(browser, FX.admin);
+    expect((await post(admin, "/api/admin/attendance/corrections", { kind: "IN", memberId: "m_emp2", effectiveAt: T0 - 60_000, reason: "+1 day off, =SUM(A1)" })).status).toBe(201);
+    const text = await (await admin.request.get("/api/admin/attendance/export.csv")).text();
+    expect(text).toContain(`"'=HYPERLINK(""http://evil.example"",""x"")"`);
+    expect(text).toContain(`"'+1 day off, =SUM(A1)"`);
+    expect(text).not.toMatch(/,=HYPERLINK/);
+    for (const c of [emp, admin]) await c.close();
+  });
+
+  test("AC-30 corrections: the attendance page adds a correction and verifies the chain", async ({ browser, request }) => {
+    const T0 = Date.parse("2026-11-17T08:00:05.000Z");
+    await setClock(request, { fixedMs: T0 });
+    const admin = await signedIn(browser, FX.admin);
+    expect((await post(admin, "/api/admin/attendance/corrections", { kind: "IN", memberId: "m_emp1", effectiveAt: T0 - 60_000, reason: "manual entry" })).status).toBe(201);
+    const page = await admin.newPage();
+    await page.goto("/admin/attendance");
+    await expect(page.locator('tr[data-seq="1"]')).toBeVisible();
+    await page.getByLabel("seq").fill("1");
+    await page.getByLabel("reason").fill("entered twice");
+    await page.getByRole("button", { name: "Add correction" }).click();
+    await expect(page.locator('tr[data-seq="1"][data-voided="1"]')).toBeVisible();
+    await page.getByRole("button", { name: "Verify chain" }).click();
+    await expect(page.locator('[data-verify="ok"]')).toBeVisible();
+    await admin.close();
   });
 });
