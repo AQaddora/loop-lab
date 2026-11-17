@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { auditFor, FX, get, loginAs, patch, post, reset, signedIn } from "./helpers/api";
+import { auditFor, del, FX, get, loginAs, patch, post, reset, signedIn } from "./helpers/api";
 
 const SETUP = {
   org: { name: "Acme Journey", allowSyncedPasskeys: true },
@@ -193,5 +193,130 @@ test.describe("AC-43 member rules", () => {
     expect((await post(emp, "/api/admin/members", { email: "x@acme.test" })).body.error).toBe("forbidden");
     expect((await get(request, "/api/admin/members")).body.error).toBe("unauthenticated");
     await emp.close();
+  });
+});
+
+test.describe("AC-31 sites and networks", () => {
+  test.beforeEach(async ({ request }) => {
+    await reset(request);
+  });
+
+  type Site = { id: string; name: string; qrMode: string; rotationSeconds: number; graceWindows: number; qrKeyVersion: number; status: string; timezone: string; networks: { id: string; cidr: string }[] };
+
+  test("AC-31 sites and networks: admin adds and edits sites; out-of-range rotation/grace -> bad_request; DISABLED status", async ({ browser }) => {
+    const admin = await signedIn(browser, FX.admin);
+    const created = await post(admin, "/api/admin/sites", { name: "Branch", timezone: "Asia/Dubai", qrMode: "static", rotationSeconds: 60, graceWindows: 2 });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const site = (created.body as { site: Site }).site;
+    expect(site).toMatchObject({ name: "Branch", timezone: "Asia/Dubai", qrMode: "static", rotationSeconds: 60, graceWindows: 2, status: "ACTIVE", qrKeyVersion: 1 });
+
+    for (const bad of [{ rotationSeconds: 9 }, { rotationSeconds: 121 }, { graceWindows: -1 }, { graceWindows: 3 }, { rotationSeconds: 30.5 }, { timezone: "Mars/Olympus" }, { qrMode: "sometimes" }, { status: "PAUSED" }, { qrKeyVersion: 9 }]) {
+      const r = await patch(admin, `/api/admin/sites/${site.id}`, bad);
+      expect(r.status, JSON.stringify(bad)).toBe(400);
+      expect(r.body.error, JSON.stringify(bad)).toBe("bad_request");
+    }
+    for (const bad of [{ name: "x", rotationSeconds: 5 }, { name: "x", graceWindows: 9 }]) {
+      expect((await post(admin, "/api/admin/sites", bad)).body.error).toBe("bad_request");
+    }
+
+    const edited = await patch(admin, `/api/admin/sites/${site.id}`, { name: "Branch 2", qrMode: "rotating", rotationSeconds: 10, graceWindows: 0, timezone: "UTC" });
+    expect((edited.body as { site: Site }).site).toMatchObject({ name: "Branch 2", qrMode: "rotating", rotationSeconds: 10, graceWindows: 0 });
+    const disabled = await patch(admin, `/api/admin/sites/${site.id}`, { status: "DISABLED" });
+    expect((disabled.body as { site: Site }).site.status).toBe("DISABLED");
+    const bumped = await patch(admin, `/api/admin/sites/${site.id}`, { bumpKeyVersion: true });
+    expect((bumped.body as { site: Site }).site.qrKeyVersion).toBe(2);
+
+    const audit = (await auditFor(admin, site.id)).map((e) => e.action);
+    expect(audit.filter((a) => a === "site.add")).toHaveLength(1);
+    expect(audit.filter((a) => a === "site.update")).toHaveLength(3);
+    await admin.close();
+  });
+
+  test("AC-31 sites and networks: adds and removes CIDRs; cidr_invalid / cidr_too_broad / cidr_not_public", async ({ browser }) => {
+    const admin = await signedIn(browser, FX.admin);
+    const add = await post(admin, `/api/admin/sites/${FX.wh}/networks`, { cidr: "203.0.113.0/24", label: "WH v4" });
+    expect(add.status).toBe(201);
+    const netId = (add.body as { networkId: string }).networkId;
+    const v6 = await post(admin, `/api/admin/sites/${FX.wh}/networks`, { cidr: "2001:DB8:20::/48" });
+    expect((v6.body as { site: Site }).site.networks.map((n) => n.cidr)).toEqual(["192.0.2.0/24", "203.0.113.0/24", "2001:db8:20::/48"]);
+    expect((await post(admin, `/api/admin/sites/${FX.wh}/networks`, { cidr: "203.0.113.7/24" })).body.error).toBe("bad_request"); // same network
+
+    const cases: [string, string][] = [
+      ["not-a-cidr", "cidr_invalid"],
+      ["203.0.113.0", "cidr_invalid"],
+      ["::ffff:203.0.113.0/120", "cidr_invalid"],
+      ["0.0.0.0/0", "cidr_too_broad"],
+      ["203.0.0.0/8", "cidr_too_broad"],
+      ["2001:db8::/16", "cidr_too_broad"],
+      ["10.0.0.0/8", "cidr_not_public"],
+      ["192.168.1.0/24", "cidr_not_public"],
+      ["127.0.0.0/8", "cidr_not_public"],
+      ["100.64.0.0/10", "cidr_not_public"],
+      ["fd00::/8", "cidr_not_public"],
+      ["fe80::/10", "cidr_not_public"],
+    ];
+    for (const [cidr, code] of cases) {
+      const r = await post(admin, `/api/admin/sites/${FX.wh}/networks`, { cidr });
+      expect(r.status, cidr).toBe(400);
+      expect(r.body.error, cidr).toBe(code);
+    }
+
+    const removed = await del(admin, `/api/admin/sites/${FX.wh}/networks/${netId}`);
+    expect(removed.status).toBe(200);
+    expect((removed.body as { site: Site }).site.networks.map((n) => n.cidr)).not.toContain("203.0.113.0/24");
+    expect((await del(admin, `/api/admin/sites/${FX.wh}/networks/${netId}`)).body.error).toBe("bad_request");
+    expect((await del(admin, `/api/admin/sites/${FX.wh}/networks/x`, { origin: "https://evil.example" })).body.error).toBe("bad_origin");
+
+    const audit = await auditFor(admin, netId);
+    expect(audit.map((e) => e.action).sort()).toEqual(["network.add", "network.remove"]);
+    await admin.close();
+  });
+
+  test("AC-31 sites and networks: the site page shows networks and the current IP, and adds a network", async ({ browser }) => {
+    const admin = await signedIn(browser, FX.admin);
+    await admin.setExtraHTTPHeaders({ "x-test-client-ip": FX.ip.inV4 });
+    const page = await admin.newPage();
+    await page.goto(`/admin/sites/${FX.hq}`);
+    await expect(page.locator('li[data-cidr="198.51.100.0/24"]')).toBeVisible();
+    await expect(page.locator("[data-my-ip]")).toHaveText(FX.ip.inV4);
+    await page.getByLabel("cidr").fill("203.0.113.0/24");
+    await page.getByRole("button", { name: "Add network" }).click();
+    await expect(page.locator('li[data-cidr="203.0.113.0/24"]')).toBeVisible();
+    await page.getByLabel("cidr").fill("10.1.0.0/16");
+    await page.getByRole("button", { name: "Add network" }).click();
+    await expect(page.locator('[data-error="cidr_not_public"]')).toBeVisible();
+    await admin.close();
+  });
+
+  test("AC-31 sites and networks: employee -> forbidden on every /api/admin/*", async ({ browser }) => {
+    // an ACTIVE employee: the owner demotes the admin
+    const owner = await signedIn(browser, FX.owner);
+    expect((await patch(owner, "/api/admin/members/m_admin", { role: "employee" })).status).toBe(200);
+    const invited = await signedIn(browser, FX.emp1);
+    const active = await signedIn(browser, FX.admin);
+    const reads = ["/api/admin/members", "/api/admin/org", "/api/admin/audit", "/api/admin/sites", `/api/admin/sites/${FX.hq}`, "/api/admin/credentials?status=PENDING", "/api/admin/attendance", "/api/admin/attendance/export.csv", "/api/admin/attendance/verify", "/api/admin/anything"];
+    const writes: ["post" | "patch" | "del", string][] = [
+      ["post", "/api/admin/members"], ["patch", "/api/admin/members/m_emp2"], ["patch", "/api/admin/org"], ["post", "/api/admin/sites"],
+      ["patch", `/api/admin/sites/${FX.hq}`], ["post", `/api/admin/sites/${FX.hq}/networks`], ["del", `/api/admin/sites/${FX.hq}/networks/net_hq_v4`],
+      ["post", `/api/admin/sites/${FX.wh}/static-qr`], ["post", "/api/admin/static-qr/x/revoke"], ["post", "/api/admin/kiosks"], ["post", "/api/admin/kiosks/x/revoke"],
+      ["post", "/api/admin/credentials/x/approve"], ["post", "/api/admin/credentials/x/reject"], ["post", "/api/admin/credentials/x/revoke"], ["post", "/api/admin/attendance/corrections"],
+    ];
+    const body = { name: "x", cidr: "203.0.113.0/24", email: "x@acme.test" };
+    for (const ctx of [invited, active]) {
+      for (const path of reads) {
+        const r = await get(ctx, path);
+        expect(r.status, path).toBe(403);
+        expect(r.body.error, path).toBe("forbidden");
+      }
+      for (const [m, path] of writes) {
+        const r = m === "del" ? await del(ctx, path) : m === "post" ? await post(ctx, path, body) : await patch(ctx, path, body);
+        expect(r.status, path).toBe(403);
+        expect(r.body.error, path).toBe("forbidden");
+      }
+    }
+    // the site was not touched
+    const site = await get<{ site: Site }>(owner, `/api/admin/sites/${FX.hq}`);
+    expect(site.body.site.networks.map((n) => n.cidr)).toEqual(["198.51.100.0/24", "2001:db8:10::/48"]);
+    for (const c of [owner, invited, active]) await c.close();
   });
 });

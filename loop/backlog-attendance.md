@@ -39,7 +39,7 @@ The spec was revised on 2026-11-17 by an adversarial review after T01–T05 had 
   src/lib/origin.ts (Origin required, missing = bad_origin, JSON only, /api/test/* exempt; §2.7), src/lib/audit.ts, admin authz helper, admin-write rate limit. e2e helpers send Origin on every write.
   Sign-in policy step 0 + /admin/setup + /api/admin/setup (only while no org exists), PATCH /api/admin/org (owner); add `{fixture:'empty'}` to /api/test/reset if T06 did not.
   /admin/members + /api/admin/members[/id]: one or an array; code/status/email edits; owner-only role grants; no self role/status change; last-owner guard; google_sub never writable (§1.1.3). AC-33, AC-42, AC-43.
-- [ ] T19 · Admin sites + networks — deps: T07, T18 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-31 && npm --prefix apps/attendance run e2e`
+- [x] T19 · Admin sites + networks — deps: T07, T18 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-31 && npm --prefix apps/attendance run e2e`
   /admin/sites/[id] + /api/admin/sites[/id]: timezone, qr_mode, rotation 10–120, grace 0–2, status ACTIVE/DISABLED, key-version bump; networks POST/DELETE through parseCidr(); "your current IP" from /api/client-ip.
   Every write audited and Origin-checked; employee → `forbidden` on every /api/admin/*. AC-31.
 - [ ] T08 · QR scan entry + scan tickets + static QR + security headers — deps: T19 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-12 AC-13 AC-14 AC-15 AC-38 && npm --prefix apps/attendance run e2e`

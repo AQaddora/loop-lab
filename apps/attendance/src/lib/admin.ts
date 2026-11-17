@@ -25,7 +25,7 @@ export function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
 export async function adminWrite<T>(
   req: Request,
   schema: z.ZodType<T>,
-  opts: { owner?: boolean } = {},
+  opts: { owner?: boolean; noBody?: boolean } = {},
 ): Promise<{ ctx: AdminCtx; body: T }> {
   assertWriteRequest(req);
   const actor = await requireAdmin(opts);
@@ -33,7 +33,7 @@ export async function adminWrite<T>(
   const now = nowMs();
   const rl = hit(db, `admin:${actor.id}`, RATE_LIMITS.adminWrite.limit, RATE_LIMITS.adminWrite.windowMs, now);
   if (!rl.ok) throw new AppError("rate_limited");
-  const body = parseBody(schema, await readJson(req));
+  const body = parseBody(schema, opts.noBody ? {} : await readJson(req));
   return { ctx: { db, actor, now, ip: clientIp(req.headers) }, body };
 }
 

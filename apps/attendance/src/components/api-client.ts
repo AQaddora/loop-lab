@@ -9,7 +9,8 @@ export async function apiSend<T = Record<string, unknown>>(
 ): Promise<ApiReply<T>> {
   const res = await fetch(`${base}${path}`, {
     method,
-    headers: body === undefined ? {} : { "content-type": "application/json" },
+    // writes always declare JSON (the server requires it, even for a body-less DELETE)
+    headers: method === "GET" ? {} : { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: "same-origin",
   });
