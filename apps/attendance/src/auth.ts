@@ -6,7 +6,7 @@ import NextAuth, { type NextAuthConfig } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import { getDb } from "@/db";
-import { withBase } from "@/lib/base-path";
+import { basePath, withBase } from "@/lib/base-path";
 import { nowMs } from "@/lib/clock";
 import { claimsFromGoogle, claimsFromTestLogin, type Claims } from "@/lib/identity";
 import { evaluateSignIn } from "@/lib/signin-policy";
@@ -45,6 +45,10 @@ function claimsFrom(params: {
   return null;
 }
 
+// spec §2.7: HttpOnly + SameSite=Lax, Path = BASE_PATH or "/"; over https __Host- (no base path) or __Secure-
+const https = (process.env.AUTH_URL ?? "").startsWith("https://");
+const sessionCookieName = https ? (basePath() === "" ? "__Host-authjs.session-token" : "__Secure-authjs.session-token") : "authjs.session-token";
+
 const signInError = (code: string) => withBase(`/signin?error=${encodeURIComponent(code)}`);
 
 export const authConfig: NextAuthConfig = {
@@ -52,6 +56,13 @@ export const authConfig: NextAuthConfig = {
   trustHost: true,
   providers,
   session: { strategy: "jwt", maxAge: SESSION_MAX_AGE_S },
+  useSecureCookies: https,
+  cookies: {
+    sessionToken: {
+      name: sessionCookieName,
+      options: { httpOnly: true, sameSite: "lax", path: basePath() || "/", secure: https },
+    },
+  },
   jwt: { maxAge: SESSION_MAX_AGE_S },
   pages: { signIn: withBase("/signin"), error: withBase("/signin") },
   callbacks: {

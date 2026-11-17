@@ -12,6 +12,7 @@ export default function SiteClient({ base, initial }: { base: string; initial: S
   const [site, setSite] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const [myIp, setMyIp] = useState<string | null>(null);
+  const [minted, setMinted] = useState<{ id: string; url: string; expiresAt: number } | null>(null);
 
   useEffect(() => {
     apiSend<{ ip: string | null }>(base, "GET", "/api/client-ip").then((r) => setMyIp(r.body.ip ?? null));
@@ -43,6 +44,19 @@ export default function SiteClient({ base, initial }: { base: string; initial: S
     const f = new FormData(form);
     await call("POST", `/api/admin/sites/${site.id}/networks`, { cidr: String(f.get("cidr")), label: String(f.get("label") || "") || undefined });
     form.reset();
+  }
+
+  async function mint(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const r = await apiSend<{ qr: { id: string; url: string; expiresAt: number } }>(base, "POST", `/api/admin/sites/${site.id}/static-qr`, {
+      ttlSeconds: Math.round(Number(f.get("days")) * 86_400),
+      label: String(f.get("qrLabel") || "") || undefined,
+    });
+    if (r.status === 201) {
+      setError(null);
+      setMinted(r.body.qr);
+    } else setError(r.body.error ?? "error");
   }
 
   return (
@@ -83,6 +97,21 @@ export default function SiteClient({ base, initial }: { base: string; initial: S
         <button type="submit">Add network</button>
       </form>
       <p className="muted">Add both the IPv4 egress and the IPv6 prefix (e.g. /48 or /64) if the Wi-Fi has IPv6.</p>
+      {site.qrMode === "static" ? (
+        <>
+          <h2>Printed QR</h2>
+          <p className="muted">Weaker than a kiosk: a forwarded photo works until it expires, so only the IP gate protects it.</p>
+          <form onSubmit={mint}>
+            <input name="days" type="number" min={1} max={30} defaultValue={7} aria-label="days" /> days{" "}
+            <input name="qrLabel" placeholder="label" aria-label="qr label" /> <button type="submit">Mint QR</button>
+          </form>
+          {minted ? (
+            <p data-minted={minted.id}>
+              <a href={`${base}/admin/sites/${site.id}/qr/${minted.id}`}>Print QR</a> (valid until {new Date(minted.expiresAt).toISOString()})
+            </p>
+          ) : null}
+        </>
+      ) : null}
     </div>
   );
 }

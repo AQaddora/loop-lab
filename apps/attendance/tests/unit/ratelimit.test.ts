@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Handle } from "@/db";
-import { hit, RATE_LIMITS } from "@/lib/ratelimit";
+import { hit, hitIp, RATE_LIMITS } from "@/lib/ratelimit";
 import { freshDb } from "../helpers/db";
 
 const T0 = Date.parse("2026-11-17T09:00:00.000Z"); // a minute boundary
@@ -37,10 +37,19 @@ describe("AC-09 fixed window", () => {
     expect(hit(h.db, "ip:198.51.100.23", 2, 60_000, T0).ok).toBe(true);
   });
 
-  it("AC-09 fixed window: spec limits", () => {
+  it("AC-09 fixed window: spec limits (§2.7 table as revised)", () => {
     expect(RATE_LIMITS.webauthn).toEqual({ limit: 10, windowMs: 60_000 });
-    expect(RATE_LIMITS.scan).toEqual({ limit: 30, windowMs: 60_000 });
-    expect(RATE_LIMITS.signin).toEqual({ limit: 20, windowMs: 60_000 });
+    expect(RATE_LIMITS.ipOutside).toEqual({ limit: 30, windowMs: 60_000 });
+    expect(RATE_LIMITS.ipInside).toEqual({ limit: 600, windowMs: 60_000 });
+    expect(RATE_LIMITS.kioskPair).toEqual({ limit: 10, windowMs: 60_000 });
     expect(RATE_LIMITS.adminWrite).toEqual({ limit: 60, windowMs: 60_000 });
+  });
+
+  it("AC-09 fixed window: the shared IP bucket allows 30 from outside and 600 from inside", () => {
+    for (let i = 0; i < 30; i++) expect(hitIp(h.db, "203.0.113.9", false, T0).ok).toBe(true);
+    expect(hitIp(h.db, "203.0.113.9", false, T0).ok).toBe(false);
+    for (let i = 0; i < 31; i++) expect(hitIp(h.db, "198.51.100.23", true, T0).ok).toBe(true);
+    for (let i = 0; i < 30; i++) hitIp(h.db, null, true, T0);
+    expect(hitIp(h.db, null, true, T0).ok).toBe(false); // unknown IP never gets the office allowance
   });
 });

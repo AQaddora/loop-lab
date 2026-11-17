@@ -4,9 +4,10 @@ import { getDb } from "@/db";
 import { withBase } from "@/lib/base-path";
 import { nowMs } from "@/lib/clock";
 import { clientIp } from "@/lib/ip";
-import { hit, RATE_LIMITS } from "@/lib/ratelimit";
+import { hitIp } from "@/lib/ratelimit";
+import { insideAnySite } from "@/lib/tickets";
 
-// sign-in steps (identity proof returns) are limited per IP (spec §2.7: 20/min)
+// sign-in steps share the per-IP bucket of /s/* and /api/client-ip (spec §2.7: 30/min outside, 600/min inside)
 function isSignInStep(req: NextRequest): boolean {
   const p = req.nextUrl.pathname;
   return /\/api\/auth\/callback\//.test(p) || (req.method === "POST" && /\/api\/auth\/signin\//.test(p));
@@ -14,8 +15,9 @@ function isSignInStep(req: NextRequest): boolean {
 
 function limited(req: NextRequest): Response | null {
   if (!isSignInStep(req)) return null;
-  const ip = clientIp(req.headers) ?? "unknown";
-  const r = hit(getDb(), `signin:${ip}`, RATE_LIMITS.signin.limit, RATE_LIMITS.signin.windowMs, nowMs());
+  const db = getDb();
+  const ip = clientIp(req.headers);
+  const r = hitIp(db, ip, insideAnySite(db, ip), nowMs());
   if (r.ok) return null;
   return Response.redirect(new URL(withBase("/signin?error=rate_limited"), req.nextUrl.origin), 303);
 }

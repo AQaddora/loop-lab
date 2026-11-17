@@ -42,7 +42,7 @@ The spec was revised on 2026-11-17 by an adversarial review after T01–T05 had 
 - [x] T19 · Admin sites + networks — deps: T07, T18 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-31 && npm --prefix apps/attendance run e2e`
   /admin/sites/[id] + /api/admin/sites[/id]: timezone, qr_mode, rotation 10–120, grace 0–2, status ACTIVE/DISABLED, key-version bump; networks POST/DELETE through parseCidr(); "your current IP" from /api/client-ip.
   Every write audited and Origin-checked; employee → `forbidden` on every /api/admin/*. AC-31.
-- [ ] T08 · QR scan entry + scan tickets + static QR + security headers — deps: T19 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-12 AC-13 AC-14 AC-15 AC-38 && npm --prefix apps/attendance run e2e`
+- [x] T08 · QR scan entry + scan tickets + static QR + security headers — deps: T19 — done when: `bash apps/attendance/scripts/check-ac-coverage.sh AC-12 AC-13 AC-14 AC-15 AC-38 && npm --prefix apps/attendance run e2e`
   GET /s/[siteId]?t= → rate limit → IP → token (§2.1 verify block; unknown site qr_invalid, DISABLED qr_revoked) → scan_tickets row + HttpOnly `scan_ticket` cookie (Max-Age = TTL, Path §2.7) → 303 /punch; `<main data-error>` page.
   Static QR: POST /api/admin/sites/[id]/static-qr (TTL ≤ 30 d else ttl_too_long), printable /admin/sites/[id]/qr/[qrId], revoke. src/proxy.ts CSP nonce + headers (§2.7). /s/* + /api/client-ip rate limits (office-IP allowance).
   AC-14 freezes the clock: add `{fixedMs}` to /api/test/clock if T06 did not. AC-12, AC-13, AC-14, AC-15, AC-38.
