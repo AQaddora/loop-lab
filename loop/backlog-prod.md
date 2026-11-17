@@ -12,7 +12,8 @@ Started by the loop holder's steering decision D-023 (2026-11-17). T16 in `loop/
   PR-01, PR-02, PR-03. `loop/deploy/autodeploy.sh` per spec §4.1–4.2 (flock, state.json, `deploy/<ts>` tag, ledger `deployed`, fleet deployments.jsonl). Cron: `/etc/cron.d/loop-lab-autodeploy`, every 2 min.
 - [ ] P03 · Production observer — deps: P02 — done when: `bash tests/deploy/observe.test.sh && bash loop/deploy/observe-prod.sh --once`
   PR-05, PR-06. O1–O7 from spec §4.3, state-change-only logging, pause plus decision on O3/O4/O5. Adds `apps/attendance/scripts/verify-chain.mjs` and the nightly backup. Cron: `/etc/cron.d/loop-lab-observe`, every 10 min.
-- [ ] P04 · CI oracle for trainee PRs + secret scan — deps: T16 — done when: `bash loop/checks/secret-scan.sh && gh run list -R AQaddora/loop-lab -w oracle -L 1 --json conclusion -q '.[0].conclusion' | grep -qx success`
+- [x] P04 · CI oracle for trainee PRs + secret scan — deps: T16 — done when: `bash loop/checks/secret-scan.sh && gh run list -R AQaddora/loop-lab -w oracle -L 1 --json conclusion -q '.[0].conclusion' | grep -qx success`
+  Done 2026-11-17 by the orchestrator seat: `secret-scan.sh` PASS, GitHub `oracle` run on 2a21bbe = success.
   PR-07, PR-08. `.github/workflows/oracle.yml` (pull_request + push to main; no secrets; Playwright Chromium), `loop/checks/secret-scan.sh`.
 - [ ] P05 · Protect main — deps: P04 — done when: `gh api repos/AQaddora/loop-lab/branches/main/protection -q '.required_status_checks.contexts[]' | grep -qx oracle`
   PR-09, D-024. Required check `oracle`, a required CODEOWNER review for PRs, no force-push. The owner's loop commits are not blocked (enforce_admins off).

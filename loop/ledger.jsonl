@@ -96,3 +96,4 @@
 {"ts":"2026-11-17T22:41:36Z","loop":"feature","app":"attendance","task":"T16","event":"test_pass","detail":"AC-39 coverage PASS; smoke-remote https://attendance.apps.taqat.academy 12 PASS 0 FAIL 0 ERROR 0 SKIP","commit":"feeb435"}
 {"ts":"2026-11-17T22:41:36Z","loop":"deploy","app":"attendance","task":"T16","event":"deployed","detail":"LIVE https://attendance.apps.taqat.academy (feeb435d88d9, bootstrap deploy). Admin: https://attendance.apps.taqat.academy/admin/setup, Google sign-in as the owner account. Autodeploy paused on D-025 (ship.sh no-op redeploy).","commit":"feeb435"}
 {"ts":"2026-11-17T22:41:36Z","loop":"feature","app":"attendance","task":"T16","event":"done","detail":"T16 ticked: first production deploy live; the production loop (specs/prod-loop.md) takes over","commit":"feeb435"}
+{"ts":"2026-11-17T22:42:24Z","loop":"deploy","app":"attendance","task":"P04","event":"done","detail":"CI oracle green on GitHub (2a21bbe); secret-scan PASS","commit":"2a21bbe"}

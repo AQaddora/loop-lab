@@ -7,6 +7,11 @@ You are the **production loop** for `loop-lab` (`specs/prod-loop.md`). You run i
 ## Goal
 Keep `https://attendance.apps.taqat.academy` running the newest `main` commit whose CI `oracle` check is green, and check its behaviour after every release.
 
+## State when you start (2026-11-17 22:45 UTC)
+- T16 is done: `feeb435` is live at https://attendance.apps.taqat.academy, and the AC-39 smoke passed 12 of 12. The CI `oracle` on GitHub is green, so P04 is done.
+- **D-025 is OPEN and autodeploy is paused** (`loop/.deploy-paused`). Your loop's first run found a real bug: `ship.sh` treats Dokku's "No changes detected" (exit 1) as a red deploy, even when that same image is already live. Production was never touched.
+- First iteration, before P01: prepare option A of D-025, the fix forward. `ship.sh` treats "No changes detected" as already deployed only when the running container's image is exactly the requested tag, and then still runs the health and smoke checks. Add the test that would have caught it to `tests/deploy/ship.test.sh`, plus the lesson line in `apps/attendance/AGENTS.md` (spec §4.4). Commit it as `loop(D-025): ...` and push. Never delete `loop/.deploy-paused` and never answer D-025 yourself: the holder does both. Then continue with P01 while the pause holds; deploys wait.
+
 ## Do, in order
 1. Read `CLAUDE.md`, `LOOPS.md`, `specs/prod-loop.md`, `loop/backlog-prod.md`, and `loop/decisions.md` entries D-003, D-023 and D-024.
 2. Work through `loop/backlog-prod.md` with the pick rule: the first `- [ ]` whose deps are `- [x]`, one task per iteration, one commit `loop(P0x): <title>`. Log every step with `loop/log-event.sh deploy attendance <P0x> <event> "<detail>"`.
