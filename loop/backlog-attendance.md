@@ -18,7 +18,7 @@ A done-when must FAIL before the work and PASS after. Never skip or weaken an AC
 - [x] T04 · Client IP + CIDR allowlist + QR token primitives — deps: T02 — done when: `npm --prefix apps/attendance test -- tests/unit/ip.test.ts tests/unit/qr.test.ts`
   src/lib/ip.ts `clientIp(headers)` + `ipAllowed(ip, cidrs)` via ipaddr.js (§2.2); src/lib/qr.ts mint/verify rotating + static with HMAC-SHA256 + timingSafeEqual (§2.1).
   Pure functions, clock injected. AC-02, AC-03, AC-04, AC-05.
-- [ ] T05 · Hash chain, punch state machine, rate limiter — deps: T03 — done when: `npm --prefix apps/attendance test -- tests/unit/chain.test.ts tests/unit/punch-state.test.ts tests/unit/ratelimit.test.ts`
+- [x] T05 · Hash chain, punch state machine, rate limiter — deps: T03 — done when: `npm --prefix apps/attendance test -- tests/unit/chain.test.ts tests/unit/punch-state.test.ts tests/unit/ratelimit.test.ts`
   src/lib/chain.ts: canonical JSON + HMAC(LOG_CHAIN_KEY) + `verifyChain()` → first bad seq (§2.6); src/lib/punch-state.ts, pure (§2.5 step 9); src/lib/ratelimit.ts, DB fixed window (§2.7).
   AC-06, AC-07, AC-09.
 - [ ] T06 · Auth.js (Google + allowlist policy) + test harness + prod guard — deps: T02, T03 — done when: `npm --prefix apps/attendance run e2e -- --grep "AC-(10|11)\b" && bash apps/attendance/scripts/check-prod-no-test-mode.sh`
