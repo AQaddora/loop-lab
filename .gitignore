@@ -1,0 +1,57 @@
+# deps / build output
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# test output
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/
+
+# secrets: real values only in apps/*/.env.local (loop/secrets.sh links it); .env.example = names only
+.env
+.env.*
+!.env.example
+!.env.e2e
+*.pem
+*.key
+
+# runtime data
+.data/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# loop runtime state (per checkout, never committed)
+loop/.gate
+loop/.gate-retries
+loop/.gate-green
+loop/.gate-gaveup
+
+# local Claude Code state
+.claude/settings.local.json
+.claude/worktrees/
+
+# OS / editor
+.DS_Store
+*.swp
+*.log
+
+# production deploy runtime state (per host, never committed; see loop/deploy/ship.sh)
+loop/deploy/state.json
+loop/deploy/state.json.tmp
+loop/deploy/.lock
+loop/.deploy-paused
+loop/deploy/inflight.json
+loop/deploy/inflight.json.tmp
+
+# python bytecode (never publish)
+__pycache__/
+*.py[co]
