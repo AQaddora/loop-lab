@@ -54,6 +54,26 @@ jobs:
             echo "::warning title=secret scan did not run::loop/checks/secret-scan.sh is not in this commit"
           fi
 
+      - name: Deploy tests (spec 4.4, the lesson station)
+        # Bash only, so it runs before the Node install and fails fast.
+        # Fails when the glob matches nothing: a check that finds no tests must not pass silently,
+        # which is how a deleted or renamed test file turns into a green run that proves nothing.
+        run: |
+          set -u
+          found=0
+          for t in tests/deploy/*.test.sh; do
+            [ -e "$t" ] || continue
+            found=$((found + 1))
+            echo "::group::$t"
+            bash "$t"
+            echo "::endgroup::"
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "::error title=no deploy tests ran::tests/deploy/*.test.sh matched nothing, but spec 4.4 requires the test that would have caught a production miss to run in CI"
+            exit 1
+          fi
+          echo "deploy tests: $found file(s) ran"
+
       - name: Set up Node 22
         uses: actions/setup-node@v4
         with:
